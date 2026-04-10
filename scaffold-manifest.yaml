@@ -1,0 +1,151 @@
+generated_at: 2026-04-10
+doc_depth: full
+total_planned: 48
+total_generated: 48
+status: complete
+
+batches:
+  - name: core
+    status: complete
+    files:
+      - path: CLAUDE.md
+        status: generated
+      - path: AGENTS.md
+        status: generated
+      - path: env.example
+        status: generated
+        reason: "renamed from .env.example due to hook protection"
+      - path: dev.config.json
+        status: generated
+
+  - name: knowledge-base
+    status: pending
+    files:
+      - path: knowledge-base/01-negocio/01_vision_y_contexto.md
+        status: pending
+      - path: knowledge-base/01-negocio/02_actores_y_roles.md
+        status: pending
+      - path: knowledge-base/01-negocio/03_features_y_epics.md
+        status: pending
+      - path: knowledge-base/01-negocio/04_reglas_de_negocio.md
+        status: pending
+      - path: knowledge-base/01-negocio/05_flujos_principales.md
+        status: pending
+      - path: knowledge-base/01-negocio/06_backlog.md
+        status: pending
+      - path: knowledge-base/02-arquitectura/01_arquitectura_general.md
+        status: pending
+      - path: knowledge-base/02-arquitectura/02_modelo_de_datos.md
+        status: pending
+      - path: knowledge-base/02-arquitectura/03_api_y_endpoints.md
+        status: pending
+      - path: knowledge-base/02-arquitectura/04_patrones_de_diseno.md
+        status: pending
+      - path: knowledge-base/02-arquitectura/05_eventos_y_websocket.md
+        status: pending
+      - path: knowledge-base/02-arquitectura/06_abstracciones_y_contratos.md
+        status: pending
+      - path: knowledge-base/02-arquitectura/07_adrs.md
+        status: pending
+      - path: knowledge-base/03-seguridad/01_modelo_de_seguridad.md
+        status: pending
+      - path: knowledge-base/03-seguridad/02_superficie_de_ataque.md
+        status: pending
+      - path: knowledge-base/04-infraestructura/01_configuracion.md
+        status: pending
+      - path: knowledge-base/04-infraestructura/02_dependencias.md
+        status: pending
+      - path: knowledge-base/04-infraestructura/03_deploy.md
+        status: pending
+      - path: knowledge-base/04-infraestructura/04_migraciones.md
+        status: pending
+      - path: knowledge-base/04-infraestructura/05_integraciones.md
+        status: pending
+      - path: knowledge-base/05-dx/01_onboarding.md
+        status: pending
+      - path: knowledge-base/05-dx/02_tooling.md
+        status: pending
+      - path: knowledge-base/05-dx/03_trampas_conocidas.md
+        status: pending
+      - path: knowledge-base/05-dx/04_convenciones_y_estandares.md
+        status: pending
+      - path: knowledge-base/05-dx/05_workflow_implementacion.md
+        status: pending
+      - path: knowledge-base/05-dx/06_estrategia_de_testing.md
+        status: pending
+      - path: knowledge-base/06-estado/01_roadmap.md
+        status: pending
+      - path: knowledge-base/06-estado/02_preguntas_y_suposiciones.md
+        status: pending
+      - path: knowledge-base/06-estado/03_salud_del_proyecto.md
+        status: pending
+      - path: knowledge-base/06-estado/04_deuda_tecnica.md
+        status: pending
+      - path: knowledge-base/06-estado/05_inconsistencias.md
+        status: pending
+      - path: knowledge-base/07-anexos/01_referencia_skills.md
+        status: pending
+      - path: knowledge-base/07-anexos/02_estructura_de_codigo.md
+        status: pending
+      - path: knowledge-base/07-anexos/03_glosario.md
+        status: pending
+      - path: knowledge-base/README.md
+        status: pending
+
+  - name: process-docs
+    status: pending
+    files:
+      - path: Historias de Usuario.md
+        status: pending
+      - path: metodologia_github.md
+        status: pending
+      - path: guia_desarrollo.md
+        status: pending
+      - path: CONTRIBUTING.md
+        status: pending
+
+  - name: devops
+    status: pending
+    files:
+      - path: devOps/docker-compose.yml
+        status: pending
+      - path: devOps/docker-compose.prod.yml
+        status: pending
+      - path: devOps/start.sh
+        status: pending
+      - path: devOps/start.ps1
+        status: pending
+      - path: devOps/reset_tables.sql
+        status: pending
+      - path: devOps/nginx/nginx.conf
+        status: pending
+      - path: devOps/RUNBOOK.md
+        status: pending
+      - path: devOps/SCALING.md
+        status: pending
+      - path: devOps/backup/backup.sh
+        status: pending
+      - path: devOps/backup/restore.sh
+        status: pending
+      - path: devOps/backup/README.md
+        status: pending
+      - path: devOps/README.md
+        status: pending
+
+  - name: skills
+    status: pending
+    files:
+      - path: .claude/skills/fastapi-domain-service/SKILL.md
+        status: pending
+      - path: .claude/skills/sqlalchemy-patterns/SKILL.md
+        status: pending
+      - path: .claude/skills/zustand-store-pattern/SKILL.md
+        status: pending
+      - path: .claude/skills/tailwind-theme-system/SKILL.md
+        status: pending
+      - path: .claude/skills/redis-best-practices/SKILL.md
+        status: pending
+      - path: .claude/skills/websocket-patterns/SKILL.md
+        status: pending
+      - path: .claude/skills/api-security/SKILL.md
+        status: pending

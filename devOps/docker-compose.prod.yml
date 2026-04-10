@@ -1,0 +1,54 @@
+version: "3.9"
+
+# Override de producción. Usar junto con docker-compose.yml:
+# docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    volumes: []
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+    restart: always
+    ports: []
+    networks:
+      - ainative-net
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    restart: always
+    networks:
+      - ainative-net
+
+  nginx:
+    image: nginx:1.25-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - nginx-certs:/etc/nginx/certs:ro
+    depends_on:
+      - api
+      - frontend
+    restart: always
+    networks:
+      - ainative-net
+
+  db:
+    ports: []
+    restart: always
+
+  redis:
+    ports: []
+    restart: always
+
+networks:
+  ainative-net:
+    driver: bridge
+
+volumes:
+  nginx-certs:

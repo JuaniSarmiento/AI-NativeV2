@@ -1,0 +1,46 @@
+{
+  "project": "Plataforma AI-Native",
+  "team": {
+    "size": 4,
+    "members": [
+      {
+        "name": "Dev 1",
+        "phase": "Fase 1 — Core Académico + Sandbox",
+        "schema_ownership": "operational (courses, exercises, submissions, snapshots)"
+      },
+      {
+        "name": "Dev 2",
+        "phase": "Fase 2 — Tutor IA Socrático",
+        "schema_ownership": "operational (tutor_interactions), governance (governance_events, tutor_system_prompts)"
+      },
+      {
+        "name": "Dev 3",
+        "phase": "Fase 3 — Motor Cognitivo + Evaluación",
+        "schema_ownership": "cognitive (sessions, events, metrics, reasoning), analytics (risk_assessments)"
+      },
+      {
+        "name": "Dev 4",
+        "phase": "Fase 4 — Frontend Completo",
+        "schema_ownership": "none (consumes APIs)"
+      }
+    ]
+  },
+  "workflow": {
+    "branching": "github-flow",
+    "commit_style": "conventional",
+    "issue_tracker": "github-issues",
+    "ci": "github-actions"
+  },
+  "ports": {
+    "backend": 8000,
+    "frontend": 5173,
+    "database": 5432,
+    "redis": 6379
+  },
+  "timeline": {
+    "phase_0": "Semanas 1-2 (todos juntos)",
+    "phases_1_to_4": "Semanas 3-12 (paralelo)",
+    "integration": "Semanas 13-14",
+    "qa_and_pilot": "Semanas 15-16"
+  }
+}
