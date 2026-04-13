@@ -89,11 +89,15 @@ La separación es **conceptual y de ownership**, no de despliegue.
 
 ```
 [ Single Process: FastAPI App ]
-├── /phase1  →  phase1 router → phase1 service → phase1 repo → operational.*
-├── /phase2  →  phase2 router → phase2 service → phase2 repo → cognitive.*
-├── /phase3  →  phase3 router → phase3 service → phase3 repo → cognitive.*
-├── /phase4  →  phase4 router → phase4 service → phase4 repo → governance.*
-└── /shared  →  auth, event bus, exceptions, LLM adapters
+├── features/auth        → router → service → repo → operational.*
+├── features/courses     → router → service → repo → operational.*
+├── features/exercises   → router → service → repo → operational.*
+├── features/sandbox     → router → service → (subprocess)
+├── features/tutor       → router → service → repo → operational.* + LLM API
+├── features/cognitive   → router → service → repo → cognitive.*
+├── features/evaluation  → router → service → repo → cognitive.*
+├── features/governance  → router → service → repo → governance.* + analytics.*
+└── shared               → db, models, repositories, exceptions, event bus, LLM adapters
 ```
 
 ---
@@ -172,25 +176,28 @@ El **Cognitive Trace Record (CTR)** es el registro central de evidencia de la te
 Cada entrada del CTR contiene:
 ```
 entry_hash = SHA-256(
-    previous_hash ||    # Hash de la entrada anterior (o "GENESIS" si es la primera)
-    student_id ||
-    session_id ||
+    previous_hash ||    # Hash de la entrada anterior (o genesis_hash si es la primera)
     event_type ||
-    payload_json ||
+    payload_json ||     # serializado con claves ordenadas
     created_at_iso8601
 )
 ```
 
-La primera entrada de cada sesión usa `"GENESIS"` como `previous_hash`.
+El genesis hash de cada sesión se calcula como:
+```
+genesis_hash = SHA-256("GENESIS:" + session_id + ":" + started_at.isoformat())
+```
+
+Esto garantiza que el genesis hash es único por sesión.
 
 **Verificación de integridad:**
 
 ```python
-# app/phase3/services/ctr_integrity.py
+# app/features/cognitive/services/ctr_integrity.py
 
 import hashlib
 import json
-from app.phase3.repos.ctr_repo import CTRRepository
+from app.features.cognitive.repositories.ctr_repo import CTRRepository
 
 
 class CTRIntegrityVerifier:
@@ -210,13 +217,13 @@ class CTRIntegrityVerifier:
         if not entries:
             return VerificationResult(valid=True, entries_checked=0)
 
-        previous_hash = "GENESIS"
+        # El genesis hash se computa como SHA256("GENESIS:" + session_id + ":" + started_at.isoformat())
+        # y está almacenado en cognitive_sessions.genesis_hash
+        previous_hash = session.genesis_hash
 
         for i, entry in enumerate(entries):
             expected_hash = self._compute_hash(
                 previous_hash=previous_hash,
-                student_id=entry.student_id,
-                session_id=entry.session_id,
                 event_type=entry.event_type,
                 payload=entry.payload,
                 created_at=entry.created_at.isoformat(),
@@ -238,21 +245,13 @@ class CTRIntegrityVerifier:
     @staticmethod
     def _compute_hash(
         previous_hash: str,
-        student_id: str,
-        session_id: str,
         event_type: str,
         payload: dict,
         created_at: str,
     ) -> str:
-        content = (
-            previous_hash
-            + student_id
-            + session_id
-            + event_type
-            + json.dumps(payload, sort_keys=True, ensure_ascii=True)
-            + created_at
-        )
-        return hashlib.sha256(content.encode("utf-8")).hexdigest()
+        payload_str = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+        data = f"{previous_hash}:{event_type}:{payload_str}:{created_at}"
+        return hashlib.sha256(data.encode("utf-8")).hexdigest()
 ```
 
 ---
@@ -330,9 +329,9 @@ El tutor IA usa modelos de lenguaje grandes (LLM) como Claude de Anthropic. Esto
 - **Endpoint**: `wss://api.ai-native.edu/ws/tutor/chat`
 - **Autenticación**: JWT en query parameter `?token=<jwt>` (ver justificación en la sección de consecuencias).
 - **Protocolo de mensajes**:
-  - Cliente → Servidor: `{ message: string, current_code: string }`
-  - Servidor → Cliente (chunks): `{ chunk: string, done: false, classification_n4: null }`
-  - Servidor → Cliente (final): `{ chunk: "", done: true, classification_n4: "N1"|"N2"|"N3"|"N4" }`
+  - Cliente → Servidor: `{ type: "message", payload: { content: string, current_code: string } }`
+  - Servidor → Cliente (tokens): `{ type: "token", payload: { text: string } }`
+  - Servidor → Cliente (final): `{ type: "complete", payload: { classification_n4: "N1"|"N2"|"N3"|"N4" } }`
   - Servidor → Cliente (heartbeat): `{ type: "ping" }`
   - Cliente → Servidor (heartbeat): `{ type: "pong" }`
 - **Heartbeat**: ping del servidor cada 30 segundos; si no recibe pong en 10s, cierra con código 1011.
@@ -415,21 +414,22 @@ Además, si Fase 3 tiene un bug y crashea, **arrastraría a Fases 1 y 2 con él*
 
 ### Decisión
 
-**Implementar un Event Bus asíncrono basado en Redis Pub/Sub con tabla outbox en PostgreSQL como garantía de at-least-once delivery**.
+**Implementar un Event Bus asíncrono basado en Redis Streams con consumer groups y tabla outbox en PostgreSQL como garantía de at-least-once delivery**.
 
-**Canales Redis:**
+**Streams Redis:**
 ```
-ai-native:events:code        → eventos de ejecución y snapshot de código
-ai-native:events:submission  → eventos de submission de ejercicios
-ai-native:events:tutor       → eventos de interacción con el tutor
+events:submissions           → eventos de submission de ejercicios
+events:tutor                 → eventos de interacción con el tutor
+events:code                  → eventos de ejecución y snapshot de código
+events:cognitive             → eventos cognitivos (consumido por analytics-group)
 ```
 
 **Patrón dual:**
-- Redis Pub/Sub: baja latencia (< 5ms), sin persistencia (at-most-once). Para la mayoría de los eventos.
-- Tabla `operational.event_outbox`: persistencia en PostgreSQL, at-least-once. Para eventos críticos que no pueden perderse (CTR entries).
+- Redis Streams con consumer groups: at-least-once delivery, baja latencia (< 5ms), persistencia y replay. Para la mayoría de los eventos.
+- Tabla `operational.event_outbox`: persistencia en PostgreSQL, garantía transaccional. Para eventos críticos que no pueden perderse (CTR entries).
 
 **Worker de Fase 3:**
-- Suscripción a canales Redis para procesamiento en tiempo real.
+- Consumer group en Redis Streams (`cognitive-group`) para procesamiento en tiempo real.
 - Polling de outbox cada 5 segundos para eventos no procesados (fallback).
 - Ambos corren como tasks asyncio dentro del mismo proceso.
 
@@ -449,7 +449,7 @@ ai-native:events:tutor       → eventos de interacción con el tutor
 - **Consistencia eventual**: Hay un delay entre que ocurre un evento y que Fase 3 lo clasifica. En la práctica < 100ms via Redis, o < 5s via outbox. Para el uso case (clasificación cognitiva para tesis), esto es completamente aceptable.
 - **Complejidad del outbox**: La tabla outbox requiere un worker de polling y lógica de retry con backoff. Es más código que una llamada directa.
 - **Riesgo de acumulación**: Si Fase 3 está caída por horas y hay muchos estudiantes activos, el outbox puede acumular miles de eventos. Requiere monitoreo del tamaño del outbox.
-- **Orden de eventos no garantizado en Redis**: Redis Pub/Sub no garantiza orden estricto de entrega entre mensajes en diferentes canales. Para el CTR, el orden se determina por el timestamp de la entrada, no por el orden de llegada al worker.
+- **Orden de eventos entre streams**: Redis Streams garantiza orden dentro de un stream, pero no entre streams distintos. Para el CTR, el orden se determina por el timestamp de la entrada, no por el orden de llegada al worker.
 
 ---
 
@@ -460,14 +460,14 @@ ai-native:events:tutor       → eventos de interacción con el tutor
 
 **Opción B: Apache Kafka**
 - Broker de mensajes con durabilidad, ordering, consumer groups.
-- *Rechazada*: Overhead de operación (Zookeeper/KRaft, brokers, topic management) excede el scope del proyecto universitario. Redis ya es una dependencia del sistema (para caché y sesiones); reutilizarlo para Pub/Sub es más pragmático.
+- *Rechazada*: Overhead de operación (Zookeeper/KRaft, brokers, topic management) excede el scope del proyecto universitario. Redis ya es una dependencia del sistema (para caché y sesiones); reutilizarlo para Streams es más pragmático.
 
 **Opción C: RabbitMQ**
 - AMQP broker con colas durables, acks, dead-letter queues.
-- *Rechazada*: Misma razón que Kafka. Redis Pub/Sub + outbox cubre el 95% de los requisitos sin dependencias adicionales.
+- *Rechazada*: Misma razón que Kafka. Redis Streams + outbox cubre el 95% de los requisitos sin dependencias adicionales.
 
 **Opción D: Solo tabla outbox (sin Redis)**
-- Polling puro, sin Pub/Sub.
+- Polling puro, sin Streams.
 - *Descartada como opción principal*: El polling con intervalo de 5s introduce latencia innecesaria en la clasificación cognitiva. Para datos de tesis donde el tiempo de clasificación puede ser relevante, preferimos Redis para el 99% de los eventos y outbox solo como garantía.
 
 ---
@@ -505,7 +505,7 @@ La plataforma permite a los estudiantes escribir y ejecutar código Python arbit
 **Capa 1: timeout estricto (10 segundos)**
 
 ```python
-# app/phase1/services/code_executor.py
+# app/features/sandbox/services/code_executor.py
 
 import subprocess
 import resource
@@ -636,7 +636,7 @@ Los tres adaptadores implementan el protocolo:
 
 class Settings(BaseSettings):
     LLM_PROVIDER: Literal["anthropic", "openai", "ollama"] = "anthropic"
-    LLM_MODEL: str = "claude-opus-4-5"
+    LLM_MODEL: str = "claude-sonnet-4-20250514"
     ANTHROPIC_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
     OLLAMA_BASE_URL: str = "http://localhost:11434"
@@ -703,8 +703,7 @@ def create_llm_adapter(settings: Settings) -> LLMAdapter:
 Cuatro fases del proyecto se desarrollan en paralelo por subequipos diferentes:
 - **Fase 1**: Ejercicios, ejecución de código, submissions (datos operacionales del estudiante).
 - **Fase 2**: Tutor IA, sesiones de chat, historial de conversaciones (datos cognitivos de interacción).
-- **Fase 3**: Clasificación N4, CTR, cadena de hash (datos cognitivos de evaluación).
-- **Fase 4**: Gobernanza, reportes de docentes, analytics de aula (datos de governance y analytics).
+- **Fase 3**: Clasificación N4, CTR, cadena de hash, gobernanza, analytics de aula (datos cognitivos de evaluación, governance y analytics).
 
 **El problema sin aislamiento:**
 
@@ -727,20 +726,22 @@ Sin separación explícita, en un monolito típico todos los modelos vivirían e
 **Definir cuatro schemas de PostgreSQL**, uno por fase, con ownership exclusivo:
 
 ```sql
-CREATE SCHEMA IF NOT EXISTS operational;  -- Fase 1: exercises, submissions, code_executions
-CREATE SCHEMA IF NOT EXISTS cognitive;    -- Fase 2 y 3: tutor_sessions, ctr_entries, n4_classifications
-CREATE SCHEMA IF NOT EXISTS governance;   -- Fase 4: teacher_reports, flags, reviews
-CREATE SCHEMA IF NOT EXISTS analytics;    -- Fase 4: aggregated_metrics, learning_analytics
+CREATE SCHEMA IF NOT EXISTS operational;  -- Fases 0, 1 y 2: users, exercises, submissions, tutor_interactions, event_outbox
+CREATE SCHEMA IF NOT EXISTS cognitive;    -- Fase 3 ÚNICAMENTE: cognitive_sessions, cognitive_events, cognitive_metrics
+CREATE SCHEMA IF NOT EXISTS governance;   -- Fase 3: governance_events, tutor_system_prompts (versionados)
+CREATE SCHEMA IF NOT EXISTS analytics;    -- Fase 3: aggregated_metrics, learning_analytics
 ```
+
+> **Nota**: `tutor_interactions` pertenece al schema `operational` y es escrita por la Fase 2 (tutor). La Fase 3 (cognitive) la lee vía REST, nunca con queries directos.
 
 **Reglas de ownership:**
 
 | Schema | Owner (escribe) | Lectores (via REST) |
 |--------|-----------------|---------------------|
-| `operational` | Fase 1 | Fase 3 (submissions para contexto CTR) |
-| `cognitive` | Fases 2 y 3 | Fase 4 (analytics de progreso) |
-| `governance` | Fase 4 | Ninguno externo (datos sensibles de docentes) |
-| `analytics` | Fase 4 | Todos (datos agregados y anonimizados) |
+| `operational` | Fases 0, 1 y 2 | Fase 3 (submissions y tutor_interactions para contexto CTR) |
+| `cognitive` | Fase 3 ÚNICAMENTE | Fase 3 misma (analytics de progreso); docentes ven métricas agregadas vía API, nunca CTR raw |
+| `governance` | Fase 3 | Docentes y admins (vía endpoints de reportes) |
+| `analytics` | Fase 3 | Todos (datos agregados y anonimizados) |
 
 **Alembic multi-schema:**
 
@@ -748,12 +749,10 @@ Cada fase tiene su propio directorio de migraciones Alembic:
 
 ```
 alembic/
-├── phase1/        # Migraciones de schema operational
-├── phase3/        # Migraciones de schema cognitive
-└── phase4/        # Migraciones de schemas governance y analytics
+├── versions/      # Migraciones unificadas con prefijo de schema
 ```
 
-Cada fase puede migrar de forma independiente sin bloquear a las otras.
+Las migraciones están organizadas en un único directorio `versions/` con prefijos descriptivos (p. ej. `operational_`, `cognitive_`, `governance_`) para facilitar la revisión. Cada schema puede migrarse de forma independiente usando `--version-path` si el equipo lo decide en el futuro.
 
 **Cross-schema views (solo lectura, para analytics):**
 
@@ -814,6 +813,17 @@ Las vistas cross-schema están **documentadas y son read-only**. Cualquier escri
 
 ---
 
+## ADRs Pendientes de Formalizar
+
+Las siguientes decisiones están implementadas en el código pero aún no tienen ADR formal:
+
+| # | Decisión | Impacto |
+|---|----------|---------|
+| ADR-008 (propuesto) | **Soft delete por defecto**: todas las entidades activas/inactivas usan `is_active: bool` o `deleted_at: datetime \| None`. Hard delete solo para registros efímeros. **Excepción**: eventos del CTR, code_snapshots, tutor_interactions y governance_events son inmutables. | Medio |
+| ADR-009 (propuesto) | **Sin FK cross-schema**: Referencias entre schemas usan UUID sin constraint de FK. La integridad referencial se mantiene por lógica de aplicación. Esto permite migraciones independientes por schema sin dependencias de orden. | Medio |
+
+---
+
 ## Registro de Cambios
 
 | Fecha | ADR | Cambio | Autor |
@@ -825,6 +835,7 @@ Las vistas cross-schema están **documentadas y son read-only**. Cualquier escri
 | 2026-02-01 | ADR-005 | Versión inicial | Equipo |
 | 2026-02-05 | ADR-006 | Versión inicial | Equipo |
 | 2026-02-10 | ADR-007 | Versión inicial | Equipo |
+| 2026-04-12 | ADR-007 | Fix schema ownership: cognitive → Fase 3 ÚNICAMENTE; operational → Fases 0,1,2; added tutor_interactions note | Equipo |
 
 ---
 

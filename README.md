@@ -17,7 +17,7 @@ git clone <repo-url> && cd ai-native
 
 # Copiar variables de entorno
 cp env.example .env
-# Editar .env: configurar ANTHROPIC_API_KEY, JWT_SECRET_KEY, APP_SECRET_KEY
+# Editar .env: configurar ANTHROPIC_API_KEY, SECRET_KEY
 
 # Levantar con Docker Compose
 cd devOps && chmod +x start.sh && ./start.sh
@@ -25,7 +25,7 @@ cd devOps && chmod +x start.sh && ./start.sh
 # O manualmente:
 docker compose up -d
 # Esperar que DB esté healthy, luego:
-cd ../backend && pip install -e ".[dev]"
+cd ../backend && uv sync --frozen
 alembic upgrade head
 python -m app.seed  # cargar datos iniciales
 
@@ -48,8 +48,7 @@ Copiar `env.example` a `.env` y completar con valores locales. Variables crític
 | `DATABASE_URL` | PostgreSQL async connection string |
 | `REDIS_URL` | Redis connection string |
 | `ANTHROPIC_API_KEY` | API key para el tutor socrático (**CHANGE_ME**) |
-| `JWT_SECRET_KEY` | Secret para firmar tokens JWT (**CHANGE_ME**) |
-| `APP_SECRET_KEY` | Secret general de la aplicación (**CHANGE_ME**) |
+| `SECRET_KEY` | Secret para firmar tokens JWT y uso general de la aplicación (**CHANGE_ME**) |
 
 ## Estructura del Proyecto
 
@@ -75,8 +74,8 @@ ai-native/
 | Dev | Fase | Schema Owner |
 |-----|------|-------------|
 | Dev 1 | Fase 1 — Core Académico + Sandbox | operational (courses, exercises, submissions) |
-| Dev 2 | Fase 2 — Tutor IA Socrático | operational (tutor), governance |
-| Dev 3 | Fase 3 — Motor Cognitivo + Evaluación | cognitive, analytics |
+| Dev 2 | Fase 2 — Tutor IA Socrático | operational (escribe en tutor_interactions) |
+| Dev 3 | Fase 3 — Motor Cognitivo + Evaluación + Gobernanza | cognitive, governance, analytics |
 | Dev 4 | Fase 4 — Frontend Completo | — (consume APIs) |
 
 ## Timeline

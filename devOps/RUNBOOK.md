@@ -156,7 +156,7 @@ La rotación invalida **todos los tokens activos**. Coordinar con los usuarios s
 python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 
 # 2. Actualizar en .env
-#    JWT_SECRET_KEY=<nuevo_valor>
+#    SECRET_KEY=<nuevo_valor>
 
 # 3. Reiniciar la API para que tome el nuevo valor
 docker compose restart api
@@ -172,11 +172,11 @@ curl http://localhost:8000/api/v1/health
 
 ## 7. Actualizar el system prompt del tutor
 
-El system prompt del tutor está definido en `backend/app/services/tutor/prompts.py`.
+El system prompt del tutor está definido en `backend/app/features/tutor/prompts.py`.
 
 ```bash
 # 1. Editar el archivo de prompts
-#    backend/app/services/tutor/prompts.py
+#    backend/app/features/tutor/prompts.py
 
 # 2. En desarrollo (con --reload): el cambio se aplica automáticamente
 

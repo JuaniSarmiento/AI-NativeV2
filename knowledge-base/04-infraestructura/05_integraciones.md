@@ -22,7 +22,7 @@
 
 El tutor socrático usa la API de Anthropic como único proveedor LLM en la implementación inicial. La integración es la más crítica del sistema por su impacto en la experiencia pedagógica y el costo operativo.
 
-**Modelo usado**: `claude-sonnet-4-5` (configurable via `ANTHROPIC_MODEL` env var).
+**Modelo usado**: `claude-sonnet-4-20250514` (latest Claude Sonnet — configurable via `ANTHROPIC_MODEL` env var).
 **Justificación del modelo**: balance entre capacidad de razonamiento pedagógico, velocidad de respuesta, y costo por token. Los modelos Haiku son demasiado limitados para el diálogo socrático complejo; Opus tiene latencia alta para una plataforma educativa interactiva.
 
 ### 1.2 SDK Python — Instalación y cliente
@@ -51,7 +51,7 @@ def get_anthropic_client() -> anthropic.AsyncAnthropic:
 La API de Anthropic usa el formato Messages API donde el historial de la conversación se envía completo en cada request:
 
 ```python
-# app/services/tutor/llm_service.py
+# app/features/tutor/llm_service.py
 from anthropic import AsyncAnthropic
 from anthropic.types import MessageParam
 
@@ -77,7 +77,7 @@ async def send_tutor_message(
 
 ```json
 {
-  "model": "claude-sonnet-4-5",
+  "model": "claude-sonnet-4-20250514",
   "max_tokens": 2048,
   "temperature": 0.7,
   "system": "Sos un tutor socrático especializado en Python...",
@@ -94,7 +94,7 @@ async def send_tutor_message(
 Para una experiencia de tutor fluida, las respuestas se streaman al cliente via WebSocket:
 
 ```python
-# app/services/tutor/streaming_service.py
+# app/features/tutor/streaming_service.py
 from anthropic import AsyncAnthropic
 from fastapi import WebSocket
 
@@ -121,10 +121,8 @@ async def stream_tutor_response(
             full_response += text_chunk
             # Enviar chunk al cliente via WS
             await websocket.send_json({
-                "type": "tutor_chunk",
-                "session_id": session_id,
-                "content": text_chunk,
-                "done": False,
+                "type": "token",
+                "payload": {"text": text_chunk, "session_id": session_id},
             })
 
         # Obtener uso de tokens del mensaje final
@@ -136,11 +134,8 @@ async def stream_tutor_response(
 
     # Señal de fin de stream
     await websocket.send_json({
-        "type": "tutor_chunk",
-        "session_id": session_id,
-        "content": "",
-        "done": True,
-        "token_usage": token_usage,
+        "type": "complete",
+        "payload": {"session_id": session_id, "token_usage": token_usage},
     })
 
     return full_response, token_usage
@@ -158,10 +153,10 @@ Cada interacción registra el uso de tokens para:
 # response.usage.input_tokens   — tokens del system prompt + historial + mensaje del usuario
 # response.usage.output_tokens  — tokens de la respuesta del asistente
 
-# Registrar en DB (tabla tutor.messages):
+# Registrar en DB (tabla operational.tutor_interactions):
 await session.execute(
     text("""
-        INSERT INTO tutor.messages (id, session_id, role, content, token_count, prompt_version_hash)
+        INSERT INTO operational.tutor_interactions (id, session_id, role, content, token_count, prompt_version_hash)
         VALUES (:id, :session_id, :role, :content, :token_count, :prompt_hash)
     """),
     {
@@ -176,7 +171,7 @@ await session.execute(
 ```
 
 **Costo estimado de operación**:
-- `claude-sonnet-4-5`: ~$3/MTok input, ~$15/MTok output (abril 2026, verificar precios actuales)
+- `claude-sonnet-4-20250514`: ~$3/MTok input, ~$15/MTok output (abril 2026, verificar precios actuales)
 - Sesión típica de 30 mensajes: ~2000 tokens input acumulados + ~1500 tokens output total
 - Costo por sesión: ~$0.03
 - 100 alumnos × 2 sesiones/día = ~$6/día
@@ -184,7 +179,7 @@ await session.execute(
 ### 1.6 Manejo de errores
 
 ```python
-# app/services/tutor/error_handling.py
+# app/features/tutor/error_handling.py
 import anthropic
 from fastapi import HTTPException
 import logging
@@ -751,11 +746,16 @@ export const tutorWsHandler = ws.link("ws://localhost:8000/ws/tutor").on(
 
       if (data.type === "tutor_message") {
         // Simular streaming de respuesta del tutor
-        const chunks = ["¿Qué ", "estructura ", "de datos ", "pensás ", "que necesitás?"].map(
-          (chunk, i) => ({ type: "tutor_chunk", content: chunk, done: i === 4 })
-        );
-        chunks.forEach((chunk, i) => {
-          setTimeout(() => client.send(JSON.stringify(chunk)), i * 200);
+        const chunkTexts = ["¿Qué ", "estructura ", "de datos ", "pensás ", "que necesitás?"];
+        chunkTexts.forEach((chunk, i) => {
+          const isLast = i === chunkTexts.length - 1;
+          setTimeout(() => {
+            if (isLast) {
+              client.send(JSON.stringify({ type: "complete" }));
+            } else {
+              client.send(JSON.stringify({ type: "token", payload: { text: chunk } }));
+            }
+          }, i * 200);
         });
       }
     });
@@ -865,4 +865,4 @@ describe("LoginForm", () => {
 - `knowledge-base/03-seguridad/02_superficie_de_ataque.md` — guardrails del tutor LLM
 - `knowledge-base/04-infraestructura/01_configuracion.md` — env vars de Anthropic
 - `knowledge-base/04-infraestructura/02_dependencias.md` — versiones de paquetes
-- `knowledge-base/02-arquitectura/04_flujos_principales.md` — flujo completo del tutor
+- `knowledge-base/01-negocio/05_flujos_principales.md` — flujo completo del tutor

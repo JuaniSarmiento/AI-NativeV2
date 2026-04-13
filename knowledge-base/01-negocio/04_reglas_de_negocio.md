@@ -32,7 +32,7 @@ Todo evento cognitivo debe incluir: tiempo, contexto del problema, estado del es
 
 Toda interacción con IA debe registrarse completamente: prompt, respuesta, clasificación N4.
 
-- **Enforcement**: `tutor_interactions` registra student_message, tutor_response, classification_n4, model_version, prompt hash
+- **Enforcement**: `tutor_interactions` registra student_message, tutor_response, classification_n4, model_version, y el campo `prompt_hash` (VARCHAR 64) con el SHA-256 del system prompt vigente al momento de cada interacción
 - **Violación**: Llamar al LLM sin persistir la interacción
 - **Impacto**: Se pierde evidencia de N4 — el CTR queda incompleto
 
@@ -46,9 +46,9 @@ La evaluación debe ser multidimensional: técnica, cognitiva, metacognitiva, us
 
 ### RN-6: El tutor nunca entrega soluciones completas
 
-El tutor IA es un mediador socrático. Máximo 3-5 líneas de código parcial y contextual.
+El tutor IA es un mediador socrático. Máximo 5 líneas de código por bloque, siempre parcial y contextual.
 
-- **Enforcement**: Post-procesador / guardrails inspecciona cada respuesta del LLM antes de enviar al alumno. Detecta bloques de código > N líneas, soluciones completas, afirmaciones imperativas sobre "el código correcto"
+- **Enforcement**: Post-procesador / guardrails inspecciona cada respuesta del LLM antes de enviar al alumno. Detecta bloques de código > 5 líneas, soluciones completas, afirmaciones imperativas sobre "el código correcto"
 - **Violación detectada**: Se reformula automáticamente y se registra `governance_event` con `event_type: policy_violation`
 - **Impacto**: Si el tutor da respuestas, el alumno no genera evidencia de razonamiento propio → el CTR pierde validez
 
@@ -56,7 +56,7 @@ El tutor IA es un mediador socrático. Máximo 3-5 líneas de código parcial y 
 
 Una vez cerrada la sesión cognitiva, el CTR no se modifica. La integridad se garantiza por hash chain.
 
-- **Enforcement**: `hash(n) = SHA256(hash(n-1) + datos(n))` encadenado. `ctr_hash_chain` almacena el hash final. `is_valid_ctr` se computa al cierre
+- **Enforcement**: hash génesis `SHA256("GENESIS:" + session_id + ":" + started_at.isoformat())`, encadenado con `hash(n) = SHA256(hash(n-1) + datos(n))`. `ctr_hash_chain` almacena el hash final. `is_valid_ctr` se computa al cierre
 - **Violación**: Modificar un evento cognitivo después del cierre de sesión
 - **Impacto**: Se rompe la cadena de hashes — la traza deja de ser auditable
 
@@ -93,9 +93,9 @@ Código del alumno ejecutado con: timeout 10s, memory limit 128MB, sin acceso a 
 
 ### RO-4: Versionado de prompts del tutor
 
-Cada versión del system prompt tiene: semver, texto completo, hash SHA-256, flag active, notas de cambio.
+Cada versión del system prompt tiene: semver, texto completo, campo `sha256_hash` (VARCHAR 64, SHA-256 del `prompt_text` para verificación de integridad), flag active, notas de cambio.
 
-- **Enforcement**: `tutor_system_prompts` table. Cada interacción registra el hash del prompt vigente
+- **Enforcement**: `tutor_system_prompts` table con campo `sha256_hash`. Cada interacción registra el hash del prompt vigente en el campo `prompt_hash` de `tutor_interactions`
 - **Cambio de prompt**: Genera governance event. Requiere role admin. Pruebas de conformidad pedagógica antes de activar
 
 ### RO-5: Reflexión post-ejercicio obligatoria

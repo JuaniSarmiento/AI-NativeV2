@@ -65,7 +65,7 @@ La arquitectura está organizada en **4 fases de desarrollo** que mapean 1:1 a d
          ▼                          ▼                    ▼
 ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────┐
 │  PostgreSQL 16   │  │    Redis 7       │  │   Anthropic API      │
-│  (4 schemas)     │  │  (cache/pubsub)  │  │ (Claude Sonnet/Haiku)│
+│  (4 schemas)     │  │  (cache/streams) │  │ (Claude Sonnet/Haiku)│
 └──────────────────┘  └──────────────────┘  └──────────────────────┘
 ```
 
@@ -73,7 +73,7 @@ La arquitectura está organizada en **4 fases de desarrollo** que mapean 1:1 a d
 
 **Estudiante**: Usuario principal. Resuelve ejercicios, interactúa con el tutor socrático, genera trazas cognitivas. Solo puede ver su propio CTR.
 
-**Docente**: Monitorea el progreso cognitivo de los estudiantes de sus cursos. Accede a dashboards, perfiles cognitivos y patrones de razonamiento. No puede ver entregas directamente sino métricas agregadas.
+**Docente**: Monitorea el progreso de los estudiantes de sus comisiones. Puede ver entregas (`submissions`) e interacciones con el tutor (`tutor_interactions`) de los estudiantes de sus comisiones para diagnóstico pedagógico. No tiene acceso a las trazas CTR crudas (`cognitive_events`) — solo a dashboards y métricas agregadas derivadas del modelo N4.
 
 **Administrador**: Gestiona la plataforma. Configura prompts del tutor, gestiona cursos y comisiones, audita la gobernanza del sistema.
 
@@ -133,8 +133,8 @@ La arquitectura está organizada en **4 fases de desarrollo** que mapean 1:1 a d
 | Frontend | React 19 + Zustand 5 + TailwindCSS 4 | UI/UX, estado local, streaming de chat |
 | Backend API | FastAPI 0.115 + Python 3.12 | Lógica de negocio, orquestación, REST + WS |
 | PostgreSQL 16 | 4 schemas separados | Persistencia transaccional, CTR |
-| Redis 7 | Streams + PubSub + Sets | Cache, rate limiting, Event Bus interno |
-| Anthropic API | Claude Sonnet 3.5 / Haiku | Generación de respuestas socráticas |
+| Redis 7 | Streams + Sets | Cache, rate limiting, Event Bus interno (at-least-once con consumer groups) |
+| Anthropic API | claude-sonnet-4-20250514 | Generación de respuestas socráticas |
 
 ---
 
@@ -250,7 +250,7 @@ Cliente HTTP/WS
 
 1. **Las capas solo conocen la capa inmediatamente inferior.** Un Router nunca instancia un Repository directamente.
 2. **Los Services no importan tipos de FastAPI.** `Request`, `Response`, `HTTPException` son conceptos del Router.
-3. **Los Repositories no conocen la sesión de DB directamente.** Reciben la sesión por inyección de dependencias (Unit of Work).
+3. **Los Repositories reciben la AsyncSession por constructor injection (DI).** La sesión se inyecta desde las factories de dependencias o desde el Unit of Work, nunca se instancia dentro del repositorio.
 4. **Las excepciones se transforman en la capa correcta.** `DomainException` → Router la convierte en `HTTPException`.
 
 ### Flujo de Ejemplo: Enviar Ejercicio
@@ -291,13 +291,15 @@ Esta regla es un contrato arquitectural, no solo una convención. Se implementa 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Schema: operational                                                │
-│  Owner: Fases 0 y 1 (auth, courses, exercises)                     │
+│  Owner: Fases 0, 1 y 2 (auth, courses, exercises, tutor)           │
 │  Tablas: users, courses, commissions, exercises, submissions,       │
-│           code_snapshots, enrollments, tutor_interactions           │
+│           code_snapshots, enrollments, tutor_interactions,          │
+│           event_outbox                                              │
 │  Readers: cognitive (via REST GET /api/v1/*)                       │
+│  Nota: tutor_interactions pertenece a operational (escrita en F2)  │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Schema: cognitive                                                  │
-│  Owner: Fase 3 (cognitive, evaluation)                              │
+│  Owner: Fase 3 ÚNICAMENTE (cognitive, evaluation)                   │
 │  Tablas: cognitive_sessions, cognitive_events, reasoning_records,  │
 │           cognitive_metrics                                         │
 │  Readers: analytics, governance (via REST)                         │
@@ -454,33 +456,30 @@ frontend/
     │   │   ├── api/         # authApi (axios instance)
     │   │   └── types.ts     # User, TokenPair, AuthState
     │   │
-    │   ├── courses/
-    │   │   ├── components/  # CourseCard, CourseList, CommissionBadge
+    │   ├── student/
+    │   │   ├── components/  # StudentDashboard, CourseCard, CourseList
     │   │   ├── hooks/       # useCourses, useEnrollment
-    │   │   ├── store/       # courseStore
-    │   │   ├── api/         # coursesApi
+    │   │   ├── store/       # studentStore
+    │   │   ├── api/         # studentApi
     │   │   └── types.ts
     │   │
-    │   ├── exercises/
+    │   ├── exercise/
     │   │   ├── components/  # ExerciseView, CodeEditor (Monaco), TestResults
+    │   │   │               # TutorChat, MessageBubble, StreamingIndicator
     │   │   ├── hooks/       # useExercise, useSubmission, useCodeSnapshot
+    │   │   │               # useTutorChat (WebSocket + streaming)
     │   │   ├── store/       # exerciseStore (código actual, resultados)
-    │   │   ├── api/         # exercisesApi, sandboxApi
-    │   │   └── types.ts
-    │   │
-    │   ├── tutor/
-    │   │   ├── components/  # TutorChat, MessageBubble, StreamingIndicator
-    │   │   ├── hooks/       # useTutorChat (WebSocket + streaming)
-    │   │   ├── store/       # tutorStore (mensajes, estado WS)
+    │   │   │               # tutorStore (mensajes, estado WS)
     │   │   ├── ws/          # tutorWebSocket.ts (reconexión, heartbeat)
+    │   │   ├── api/         # exerciseApi, sandboxApi
     │   │   └── types.ts
     │   │
-    │   └── cognitive/
-    │       ├── components/  # CognitiveDashboard, StudentProfile, TraceViewer
-    │       │               # N4RadarChart, RiskAlert, PatternHeatmap
+    │   └── teacher/
+    │       ├── components/  # TeacherDashboard, CognitiveDashboard, StudentProfile
+    │       │               # TraceViewer, N4RadarChart, RiskAlert, PatternHeatmap
     │       ├── hooks/       # useCognitiveDashboard, useStudentTrace
-    │       ├── store/       # cognitiveStore
-    │       ├── api/         # cognitiveApi
+    │       ├── store/       # teacherStore
+    │       ├── api/         # teacherApi, cognitiveApi
     │       └── types.ts     # CognitiveSession, N4Score, RiskLevel
     │
     ├── shared/
@@ -600,10 +599,12 @@ Frontend                Backend (FastAPI)           Anthropic API
     │ ──────────────────────> │                           │
     │                         │  POST /messages (stream)  │
     │                         │ ────────────────────────> │
-    │  { type: "chunk",       │                           │
-    │    content: "¿Qué..." } │  SSE chunks               │
-    │ <────────────────────── │ <──────────────────────── │
-    │  { type: "done" }       │                           │
+    │  { type: "token",       │                           │
+    │    payload: {           │  SSE chunks               │
+    │      text: "¿Qué..."}} │ <──────────────────────── │
+    │ <────────────────────── │                           │
+    │  { type: "complete",    │                           │
+    │    payload: {...}}      │                           │
     │ <────────────────────── │                           │
 ```
 

@@ -107,7 +107,7 @@ Cada developer es responsable de su fase de extremo a extremo: backend, frontend
 - Sandbox de ejecución de código Python (subprocess con límites de CPU/memoria/tiempo)
 - Evaluación de casos de test contra el código del estudiante
 - API de envío de soluciones
-- Registro de intentos en `cognitive` schema
+- Registro de intentos en `operational` schema
 
 **Frontend**
 - Pantalla de listado de ejercicios (con filtros, paginación)
@@ -143,7 +143,7 @@ Cada developer es responsable de su fase de extremo a extremo: backend, frontend
 - Sistema de prompts: prompt base socrático, contexto del ejercicio, historial de conversación
 - Guardrails anti-solver: pre-processing del input del estudiante, post-processing de la respuesta
 - Rate limiting por usuario/sesión
-- Registro de cada mensaje como CTR en `cognitive` schema
+- Registro de cada interacción de tutor en `operational` schema (tabla `tutor_interactions`)
 - WebSocket gateway para streaming de respuestas en tiempo real
 
 **Frontend**
@@ -319,7 +319,7 @@ Después del piloto, las mejoras se priorizan según el feedback recibido:
 |---|---|---|---|
 | Fase 0 se extiende más de 2 semanas | Media | Alto | Scope mínimo definido, no gold-plating |
 | Las fases paralelas generan conflictos de DB | Baja | Alto | Schema de DB frozen después de semana 2 |
-| El tutor pasa los tests adversariales | Alta | Crítico | Revisión continua de guardrails desde semana 5 |
+| Los guardrails del tutor no logran bloquear prompts adversariales | Alta | Crítico | Revisión continua de guardrails desde semana 5 |
 | LLM costs superan presupuesto en desarrollo | Media | Medio | Usar haiku en dev, opus solo en tests de calidad |
 | Alineación con tesis es insuficiente | Media | Alto | Revisión semanal con director de tesis |
 | Problemas de performance en staging | Media | Medio | Load testing en semana 14, no en semana 15 |

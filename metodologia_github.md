@@ -187,7 +187,7 @@ api           → múltiples endpoints o router principal
 # Frontend
 dashboard     → features/student/ o features/teacher/
 editor        → Monaco Editor o features/exercises/
-chat          → features/tutor/
+chat          → features/exercise/
 store         → cualquier store de Zustand
 msw           → mocks/
 
@@ -675,7 +675,7 @@ El archivo `.github/CODEOWNERS` asigna reviewers automáticos por área:
 /backend/app/features/sandbox/     @dev-fase-1
 
 /backend/app/features/tutor/       @dev-fase-2
-/backend/app/features/governance/  @dev-fase-2
+/backend/app/features/governance/  @dev-fase-3
 
 /backend/app/features/cognitive/   @dev-fase-3
 /backend/app/features/evaluation/  @dev-fase-3

@@ -131,9 +131,9 @@ Este schema almacena toda la lógica operacional de la plataforma: usuarios, cur
 |-------|------|-------------|-------------|
 | `id` | `UUID` | PK, DEFAULT gen_random_uuid() | Identificador único |
 | `email` | `VARCHAR(255)` | UNIQUE, NOT NULL | Email del usuario, usado para login |
-| `password_hash` | `VARCHAR(255)` | NOT NULL | bcrypt hash, factor 12 |
+| `password_hash` | `VARCHAR(128)` | NOT NULL | bcrypt hash, factor 12 -- bcrypt=60chars, argon2id=97chars, 128 con margen |
 | `full_name` | `VARCHAR(255)` | NOT NULL | Nombre completo para display |
-| `role` | `ENUM('student','teacher','admin')` | NOT NULL, DEFAULT 'student' | Rol que determina permisos |
+| `role` | `ENUM('alumno','docente','admin')` | NOT NULL, DEFAULT 'alumno' | Rol que determina permisos |
 | `is_active` | `BOOLEAN` | NOT NULL, DEFAULT TRUE | Soft delete: FALSE deshabilita el acceso |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT NOW() | Timestamp de creación |
 | `updated_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT NOW() | Timestamp de última modificación |
@@ -208,6 +208,10 @@ Este schema almacena toda la lógica operacional de la plataforma: usuarios, cur
 | `test_cases` | `JSONB` | NOT NULL | Casos de prueba para auto-corrección |
 | `difficulty` | `ENUM('easy','medium','hard')` | NOT NULL | Nivel de dificultad |
 | `topic_tags` | `TEXT[]` | NOT NULL, DEFAULT '{}' | Tags de temas (ej: ['recursion', 'graphs']) |
+| `language` | `VARCHAR(50)` | NOT NULL, DEFAULT 'python' | Lenguaje del ejercicio (`python`, `javascript`, etc.) |
+| `starter_code` | `TEXT` | NOT NULL, DEFAULT '' | Código inicial provisto al estudiante |
+| `max_attempts` | `SMALLINT` | NOT NULL, DEFAULT 10 | Máximo de entregas permitidas |
+| `time_limit_minutes` | `SMALLINT` | NOT NULL, DEFAULT 60 | Tiempo límite de la sesión en minutos |
 | `order_index` | `SMALLINT` | NOT NULL, DEFAULT 0 | Orden dentro de la comisión |
 | `is_active` | `BOOLEAN` | NOT NULL, DEFAULT TRUE | Soft delete |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL | Timestamp de creación |
@@ -229,6 +233,9 @@ Este schema almacena toda la lógica operacional de la plataforma: usuarios, cur
 | `score` | `NUMERIC(5,2)` | NULLABLE | Puntuación 0.00 a 100.00 |
 | `feedback` | `TEXT` | NULLABLE | Feedback generado (puede ser por IA o manual) |
 | `test_results` | `JSONB` | NULLABLE | Resultados caso a caso de los tests |
+| `stdout` | `TEXT` | NULLABLE | Salida estándar de la ejecución |
+| `stderr` | `TEXT` | NULLABLE | Salida de error de la ejecución |
+| `attempt_number` | `SMALLINT` | NOT NULL, DEFAULT 1 | Número de intento (1-based) |
 | `submitted_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT NOW() | Timestamp de envío |
 | `evaluated_at` | `TIMESTAMPTZ` | NULLABLE | Timestamp de evaluación completada |
 
@@ -241,11 +248,13 @@ Este schema almacena toda la lógica operacional de la plataforma: usuarios, cur
 | Campo | Tipo | Constraints | Descripción |
 |-------|------|-------------|-------------|
 | `id` | `UUID` | PK | Identificador único |
-| `submission_id` | `UUID` | FK → submissions.id, NOT NULL | Entrega a la que pertenece este snapshot |
+| `student_id` | `UUID` | NOT NULL | Estudiante que generó el snapshot |
+| `exercise_id` | `UUID` | NOT NULL | Ejercicio en contexto |
+| `submission_id` | `UUID` | FK → submissions.id, NULLABLE | Entrega asociada (NULL si el snapshot es previo a la entrega) |
 | `code` | `TEXT` | NOT NULL | Código en ese momento |
 | `snapshot_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT NOW() | Timestamp exacto del snapshot |
 
-**Nota**: Los snapshots son inmutables por naturaleza (registran el histórico de edición). No tienen soft delete. Solo se insertan.
+**Nota**: Los snapshots son inmutables por naturaleza (registran el histórico de edición). No tienen soft delete. Solo se insertan. El FK a `submission_id` es nullable porque los snapshots periódicos ocurren antes de que el estudiante envíe la entrega formal.
 
 **Índices**: `ix_code_snapshots_submission_id` (para recuperar el historial de una entrega).
 
@@ -263,11 +272,30 @@ Este schema almacena toda la lógica operacional de la plataforma: usuarios, cur
 | `n4_level` | `SMALLINT` | NULLABLE, CHECK (1 to 4) | Nivel N1-N4 detectado para esta interacción |
 | `tokens_used` | `INTEGER` | NULLABLE | Tokens consumidos en la llamada a la API LLM |
 | `model_version` | `VARCHAR(100)` | NULLABLE | Versión del modelo LLM usado |
+| `prompt_hash` | `VARCHAR(64)` | NOT NULL | SHA-256 del system prompt vigente en el momento de la interacción (reconstrucción criptográfica) |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT NOW() | Timestamp de la interacción |
 
 **Índices**: `ix_tutor_interactions_student_id`, `ix_tutor_interactions_exercise_id`, `ix_tutor_interactions_student_exercise_created` (compuesto, para recuperar historial ordenado).
 
 **Nota**: Esta tabla es append-only en la práctica. No se editan mensajes pasados.
+
+---
+
+### Tabla: event_outbox
+
+Tabla de outbox para garantía at-least-once del Event Bus. Los eventos críticos se persisten aquí antes de publicarse en Redis Streams.
+
+| Campo | Tipo | Constraints | Descripción |
+|-------|------|-------------|-------------|
+| `id` | `UUID` | PK | Identificador único del evento |
+| `event_type` | `VARCHAR(100)` | NOT NULL | Tipo de evento (ej: `submission.created`, `tutor.response_received`) |
+| `payload` | `JSONB` | NOT NULL | Datos del evento |
+| `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT NOW() | Timestamp de creación |
+| `processed_at` | `TIMESTAMPTZ` | NULLABLE | Cuándo fue procesado por el consumer |
+| `retry_count` | `SMALLINT` | NOT NULL, DEFAULT 0 | Cantidad de reintentos |
+| `status` | `ENUM('pending','processed','failed')` | NOT NULL, DEFAULT 'pending' | Estado del procesamiento |
+
+**Índices**: `ix_event_outbox_status_created` (compuesto `status, created_at` — para polling eficiente del worker).
 
 ---
 
@@ -301,7 +329,7 @@ Este schema almacena toda la traza cognitiva del estudiante. Es el núcleo del s
 │ sequence_number         │       │ n2_strategy_score           │
 │ payload                 │       │ n3_validation_score         │
 │ previous_hash           │       │ n4_ai_interaction_score     │
-│ current_hash            │       │ total_interactions          │
+│ event_hash              │       │ total_interactions          │
 │ created_at              │       │ help_seeking_ratio          │
 └─────────────────────────┘       │ autonomy_index              │
                                   │ risk_level                  │
@@ -327,6 +355,7 @@ Este schema almacena toda la traza cognitiva del estudiante. Es el núcleo del s
 | `exercise_id` | `UUID` | NOT NULL | Referencia al ejercicio |
 | `started_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT NOW() | Inicio de la sesión cognitiva |
 | `closed_at` | `TIMESTAMPTZ` | NULLABLE | Fin de la sesión. NULL = sesión abierta |
+| `genesis_hash` | `VARCHAR(64)` | NULLABLE | SHA-256 del hash inicial de la cadena: SHA256("GENESIS:" + session_id + ":" + started_at.isoformat()) |
 | `session_hash` | `VARCHAR(64)` | NULLABLE | SHA-256 hash final de toda la sesión al cierre |
 | `n4_final_score` | `JSONB` | NULLABLE | Puntuaciones N1-N4 al cierre (ver sección JSONB) |
 | `status` | `ENUM('open','closed','invalidated')` | NOT NULL, DEFAULT 'open' | Estado |
@@ -348,8 +377,8 @@ Este schema almacena toda la traza cognitiva del estudiante. Es el núcleo del s
 | `event_type` | `VARCHAR(100)` | NOT NULL | Tipo de evento (ver catálogo abajo) |
 | `sequence_number` | `INTEGER` | NOT NULL | Número de secuencia dentro de la sesión (1, 2, 3...) |
 | `payload` | `JSONB` | NOT NULL | Datos del evento, variado por tipo |
-| `previous_hash` | `VARCHAR(64)` | NOT NULL | Hash del evento anterior (o hash inicial de sesión) |
-| `current_hash` | `VARCHAR(64)` | NOT NULL | SHA-256(previous_hash + event_type + payload + timestamp) |
+| `previous_hash` | `VARCHAR(64)` | NOT NULL | Hash del evento anterior (o genesis_hash de la sesión) |
+| `event_hash` | `VARCHAR(64)` | NOT NULL | SHA-256(previous_hash + event_type + payload + timestamp) — campo canónico para referencia cruzada y auditoría externa |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT NOW() | Timestamp inmutable |
 
 **Constraints**: `uq_cognitive_events_session_sequence` UNIQUE (session_id, sequence_number).
@@ -359,10 +388,11 @@ Este schema almacena toda la traza cognitiva del estudiante. Es el núcleo del s
 | event_type | Descripción | Nivel N4 |
 |------------|-------------|---------|
 | `session.started` | Inicio de sesión con ejercicio | — |
+| `reads_problem` | El estudiante leyó el enunciado del ejercicio | N1 |
 | `code.snapshot` | El estudiante guardó un snapshot del código | N1 |
-| `tutor.question_asked` | El estudiante preguntó al tutor | N4 |
-| `tutor.response_received` | El tutor respondió | N4 |
-| `code.run` | El estudiante ejecutó el código (sandbox) | N3 |
+| `tutor.question_asked` | El estudiante preguntó al tutor | N4 (Interacción con IA) |
+| `tutor.response_received` | El tutor respondió | N4 (Interacción con IA) |
+| `code.run` | El estudiante ejecutó el código (sandbox) | N3 (Validación) |
 | `submission.created` | El estudiante envió el ejercicio | N2/N3 |
 | `reflection.submitted` | El estudiante completó una reflexión guiada | N1/N2 |
 | `session.closed` | Sesión cerrada (manual o timeout) | — |
@@ -436,6 +466,7 @@ Este schema almacena toda la traza cognitiva del estudiante. Es el núcleo del s
 | `id` | `UUID` | PK | Identificador único |
 | `name` | `VARCHAR(255)` | NOT NULL | Nombre identificador del prompt |
 | `content` | `TEXT` | NOT NULL | El texto completo del system prompt para el LLM |
+| `sha256_hash` | `VARCHAR(64)` | NOT NULL | SHA-256 del contenido del prompt — permite reconstrucción criptográfica de cada interacción |
 | `version` | `VARCHAR(50)` | NOT NULL | Versión semántica (ej: "2.1.0") |
 | `is_active` | `BOOLEAN` | NOT NULL, DEFAULT FALSE | Solo un prompt puede estar activo a la vez |
 | `guardrails_config` | `JSONB` | NOT NULL | Configuración de los guardrails asociados |
@@ -565,7 +596,7 @@ class BaseRepository:
     async def get_active(self, id: UUID) -> Model | None:
         stmt = select(self.model).where(
             self.model.id == id,
-            self.model.is_active == True
+            self.model.is_active.is_(True)
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -767,7 +798,7 @@ El Registro de Traza Cognitiva (CTR) usa una cadena de hash SHA-256 para garanti
 ### Fórmula
 
 ```
-hash(0) = SHA256("GENESIS_" + session_id + started_at.isoformat())
+hash(0) = SHA256("GENESIS:" + session_id + ":" + started_at.isoformat())
 hash(n) = SHA256(hash(n-1) + event_type + serialize(payload) + created_at.isoformat())
 ```
 
@@ -786,7 +817,7 @@ class HashChainService:
     @staticmethod
     def compute_genesis_hash(session_id: UUID, started_at: datetime) -> str:
         """Calcula el hash inicial de la cadena para una nueva sesión."""
-        data = f"GENESIS_{session_id}{started_at.isoformat()}"
+        data = f"GENESIS:{session_id}:{started_at.isoformat()}"
         return hashlib.sha256(data.encode("utf-8")).hexdigest()
     
     @staticmethod

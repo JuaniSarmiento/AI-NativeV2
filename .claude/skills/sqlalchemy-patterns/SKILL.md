@@ -155,7 +155,7 @@ class N4Evaluation(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     session_id: Mapped[str] = mapped_column(
-        ForeignKey("cognitive.learning_sessions.id"), nullable=False
+        ForeignKey("cognitive.cognitive_sessions.id"), nullable=False
     )
     n4_score: Mapped[float] = mapped_column(Float, nullable=False)
     model_version: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -219,6 +219,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 async def get_session(db: AsyncSession):
     return await db.get(LearningSession, id)
 ```
+
+## Notas sobre BaseRepository
+
+- `BaseRepository` NO tiene método `delete()` (hard delete). Solo `soft_delete()` para tablas que lo soporten.
+- **Excepción**: `cognitive_events` y `code_snapshots` son **inmutables** — no tienen `soft_delete()`. Son evidencia de proceso y no se pueden modificar ni eliminar.
+- Para marcar un registro como inactivo: `instance.is_active = False` + flush/commit via UoW.
 
 ## Checklist
 

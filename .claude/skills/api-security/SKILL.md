@@ -14,7 +14,7 @@ metadata:
 ## Cuándo Usar
 
 - Al crear o modificar cualquier endpoint que requiera autenticación
-- Al implementar roles de usuario (student, professor, admin)
+- Al implementar roles de usuario (alumno, docente, admin)
 - Al configurar el flujo de refresh token rotation
 - Al agregar rate limiting a rutas de la API
 - Al revisar headers CORS, password hashing, o cualquier lógica de seguridad
@@ -55,7 +55,7 @@ async def get_current_user(
     try:
         payload = jwt.decode(
             token,
-            settings.JWT_SECRET,          # nunca hardcoded, viene de env
+            settings.SECRET_KEY,          # nunca hardcoded, viene de env
             algorithms=[settings.JWT_ALGORITHM],
         )
         jti: str | None = payload.get("jti")
@@ -86,7 +86,7 @@ from app.schemas.auth import TokenPayload
 class RequireRole:
     """
     Dependency factory para RBAC.
-    Uso: Depends(RequireRole("admin")) o Depends(RequireRole("professor", "admin"))
+    Uso: Depends(RequireRole("admin")) o Depends(RequireRole("docente", "admin"))
     """
     def __init__(self, *allowed_roles: str) -> None:
         self.allowed_roles = set(allowed_roles)
@@ -104,8 +104,8 @@ class RequireRole:
 
 # Instancias reutilizables (evita instanciar en cada endpoint)
 require_admin     = RequireRole("admin")
-require_professor = RequireRole("professor", "admin")
-require_student   = RequireRole("student", "professor", "admin")
+require_docente = RequireRole("docente", "admin")
+require_alumno   = RequireRole("alumno", "docente", "admin")
 
 # Uso en un endpoint:
 # @router.get("/admin/users")
@@ -138,7 +138,7 @@ async def rotate_refresh_token(
     try:
         payload = jwt.decode(
             refresh_token,
-            settings.JWT_REFRESH_SECRET,
+            settings.SECRET_KEY,
             algorithms=[settings.JWT_ALGORITHM],
         )
     except JWTError as exc:
@@ -170,7 +170,7 @@ def _create_access_token(user_id: str, role: str) -> str:
         "iat": now,
         "exp": now + settings.ACCESS_TOKEN_EXPIRE_SECONDS,
     }
-    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 def _create_refresh_token(user_id: str, role: str) -> str:
     now = int(time.time())
@@ -181,7 +181,7 @@ def _create_refresh_token(user_id: str, role: str) -> str:
         "iat": now,
         "exp": now + settings.REFRESH_TOKEN_EXPIRE_SECONDS,
     }
-    return jwt.encode(payload, settings.JWT_REFRESH_SECRET, algorithm=settings.JWT_ALGORITHM)
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 ```
 
 ### 4. Decorador de Rate Limiting con Redis Sliding Window
@@ -211,8 +211,9 @@ def rate_limit(limit: int, window_seconds: int, endpoint_key: str):
             user_id: str = getattr(request.state, "user_id", request.client.host)
             redis = request.state.redis
 
+            key = f"rl:{endpoint_key}:{user_id}"
             allowed, remaining = await check_rate_limit(
-                redis, user_id, endpoint_key, limit, window_seconds
+                redis, key, limit, window_seconds
             )
             if not allowed:
                 reset_at = int(time.time()) + window_seconds
@@ -237,7 +238,7 @@ def rate_limit(limit: int, window_seconds: int, endpoint_key: str):
 
 # Uso:
 # @router.post("/tutor/message")
-# @rate_limit(limit=30, window_seconds=3600, endpoint_key="tutor")
+# @rate_limit(limit=30, window_seconds=3600, endpoint_key="tutor")  # key debe incluir exercise_id: rl:tutor:{user_id}:{exercise_id}
 # async def send_message(request: Request, body: MessageBody):
 #     ...
 ```
@@ -254,7 +255,7 @@ payload = jwt.decode(token, "mi_secreto_super_seguro_123", algorithms=["HS256"])
 ```python
 # BIEN — siempre desde variables de entorno via settings
 from app.core.config import settings
-payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
 ```
 
 ### DON'T: Endpoint sin verificacion de rol (cualquier usuario autenticado accede)
@@ -268,10 +269,10 @@ async def get_summary(user: TokenPayload = Depends(get_current_user)):
 
 ```python
 # BIEN — restringir explicitamente por rol
-from app.core.security.rbac import require_professor
+from app.core.security.rbac import require_docente
 
 @router.get("/evaluations/summary")
-async def get_summary(user: TokenPayload = Depends(require_professor)):
+async def get_summary(user: TokenPayload = Depends(require_docente)):
     return await evaluation_service.get_all()
 ```
 
@@ -280,7 +281,7 @@ async def get_summary(user: TokenPayload = Depends(require_professor)):
 ```python
 # MAL — el token viejo sigue siendo válido, abre vector de replay attack
 async def rotate_refresh_token(refresh_token: str) -> TokenPair:
-    payload = jwt.decode(refresh_token, settings.JWT_REFRESH_SECRET, ...)
+    payload = jwt.decode(refresh_token, settings.SECRET_KEY, ...)
     return TokenPair(
         access_token=_create_access_token(payload["sub"], payload["role"]),
         refresh_token=_create_refresh_token(payload["sub"], payload["role"]),
@@ -311,16 +312,27 @@ allowed, remaining = await check_rate_limit(
 )
 ```
 
+## Notas Adicionales
+
+### Almacenamiento de Tokens
+
+- **Access token**: Zustand memory (no `localStorage`, no `sessionStorage`) — se pierde al recargar la página intencionalmente.
+- **Refresh token**: `httpOnly` cookie — inaccesible desde JavaScript, protege contra XSS.
+
+### Asignación de Roles
+
+El campo `role` **nunca** se acepta en el body de registro. El rol por defecto es `alumno`. Solo un administrador puede asignar roles distintos mediante un endpoint dedicado (`PATCH /api/v1/admin/users/{id}/role`).
+
 ## Checklist
 
-- [ ] `JWT_SECRET` y `JWT_REFRESH_SECRET` vienen de `settings` (env vars), nunca hardcodeados
+- [ ] `SECRET_KEY` viene de `settings` (env var), nunca hardcodeada
 - [ ] Todos los endpoints protegidos usan `Depends(get_current_user)` o `Depends(require_*)
-- [ ] Los endpoints de profesor/admin tienen `Depends(require_professor)` o `Depends(require_admin)`
+- [ ] Los endpoints de profesor/admin tienen `Depends(require_docente)` o `Depends(require_admin)`
 - [ ] El JTI se incluye en el payload de todos los tokens emitidos
 - [ ] La blacklist se verifica en `get_current_user` antes de retornar el payload
 - [ ] Refresh token rotation blacklistea el token viejo ANTES de emitir el nuevo
 - [ ] El rate limiter usa Redis sliding window (no in-memory)
-- [ ] Tutor endpoint: `limit=30, window_seconds=3600`
+- [ ] Tutor endpoint: `limit=30, window_seconds=3600`, key incluye `exercise_id` → `rl:tutor:{user_id}:{exercise_id}`
 - [ ] API general: `limit=100, window_seconds=60`
 - [ ] Los headers `X-RateLimit-*` y `Retry-After` se incluyen en las respuestas 429
 - [ ] CORS configurado con `allow_origins` explícito (no `"*"` en produccion)

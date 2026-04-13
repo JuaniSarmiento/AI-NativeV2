@@ -3,6 +3,8 @@
 **Plataforma AI-Native | UTN FRM**
 Última actualización: 2026-04-10
 
+> Este documento es una plantilla. Actualizar semanalmente una vez iniciada la implementación.
+>
 > Este documento es una plantilla de estado que se actualiza semanalmente. Cada sección tiene un estado inicial "No iniciado" o "N/A". A medida que el proyecto avanza, se actualiza con datos reales.
 
 ---
@@ -142,7 +144,7 @@
 | Módulo | Coverage Actual | Objetivo |
 |---|---|---|
 | `app/core/` | N/A | 90%+ |
-| `app/services/` | N/A | 85%+ |
+| `app/features/` | N/A | 85%+ |
 | `app/repositories/` | N/A | 80%+ |
 | `app/routers/` | N/A | 80%+ |
 | Frontend stores | N/A | 85%+ |
@@ -186,7 +188,7 @@ Los riesgos se actualizan cada semana. Para detalles completos, ver `knowledge-b
 En desarrollo intensivo, cada desarrollador hace muchas llamadas de prueba a la API de Anthropic. Sin disciplina, los costos pueden dispararse.
 
 **Mitigación**: 
-- Variable `ANTHROPIC_MODEL=claude-haiku-3-5` en `.env` de desarrollo
+- Variable `ANTHROPIC_MODEL=claude-haiku-4-5-20251001` en `.env` de desarrollo
 - Presupuesto mensual de API establecido con alertas en Anthropic Console
 - Tests adversariales corren solo en CI semanal, no en desarrollo local
 
@@ -201,7 +203,7 @@ En desarrollo intensivo, cada desarrollador hace muchas llamadas de prueba a la 
 El sandbox que ejecuta código arbitrario de estudiantes es una superficie de ataque importante. Código malicioso podría intentar acceder al sistema de archivos, red, o consumir recursos.
 
 **Mitigación**:
-- Timeout estricto de 5 segundos
+- Timeout estricto de 10 segundos
 - Límite de memoria
 - Sin acceso a red en el subprocess
 - Tests de seguridad específicos del sandbox

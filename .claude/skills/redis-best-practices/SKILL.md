@@ -1,7 +1,7 @@
 ---
 name: redis-best-practices
 description: >
-  Convenciones de naming de claves Redis, políticas de TTL, pub/sub para el event bus
+  Convenciones de naming de claves Redis, políticas de TTL, Redis Streams para el event bus
   entre fases, rate limiting con sliding window y blacklist de tokens JWT.
   Trigger: cuando se trabaje con Redis — cache, event bus, rate limiting o gestión de tokens.
 license: Apache-2.0
@@ -13,7 +13,7 @@ metadata:
 ## Cuándo Usar
 
 - Al crear o acceder a cualquier clave Redis en el proyecto
-- Al implementar rate limiting (tutor: 30 msg/hora, general: 100 req/min)
+- Al implementar rate limiting (tutor: 30 msg/hora por ejercicio, general: 100 req/min)
 - Al gestionar blacklist de tokens JWT después de refresh rotation
 - Al publicar o consumir eventos entre las fases del pipeline (Phase 1/2 → Phase 3)
 - Al revisar código que usa `redis.asyncio` o `aioredis`
@@ -31,7 +31,7 @@ from enum import StrEnum
 
 class RedisDomain(StrEnum):
     CACHE    = "cache"
-    RATELIMIT = "ratelimit"
+    RL       = "rl"
     BLACKLIST = "blacklist"
     EVENTS   = "events"
     SESSION  = "session"
@@ -40,17 +40,17 @@ def key_cache(entity: str, entity_id: str) -> str:
     """ainative:cache:{entity}:{id}"""
     return f"ainative:{RedisDomain.CACHE}:{entity}:{entity_id}"
 
-def key_ratelimit(user_id: str, endpoint: str) -> str:
-    """ainative:ratelimit:{user_id}:{endpoint}"""
-    return f"ainative:{RedisDomain.RATELIMIT}:{user_id}:{endpoint}"
+def key_tutor_ratelimit(user_id: str, exercise_id: str) -> str:
+    """rl:tutor:{user_id}:{exercise_id}"""
+    return f"rl:tutor:{user_id}:{exercise_id}"
+
+def key_login_ratelimit(ip: str) -> str:
+    """rl:login:{ip}"""
+    return f"rl:login:{ip}"
 
 def key_token_blacklist(jti: str) -> str:
     """ainative:blacklist:token:{jti}"""
     return f"ainative:{RedisDomain.BLACKLIST}:token:{jti}"
-
-def key_event(source: str, event_type: str) -> str:
-    """ainative:events:{source}:{event_type}"""
-    return f"ainative:{RedisDomain.EVENTS}:{source}:{event_type}"
 
 def key_session(user_id: str) -> str:
     """ainative:session:{user_id}"""
@@ -59,19 +59,18 @@ def key_session(user_id: str) -> str:
 
 ### 2. Sliding Window Rate Limiter con Pipeline
 
-Rate limits del proyecto: **30 msg/hora** para el tutor IA, **100 req/min** general.
+Rate limits del proyecto: **30 msg/hora por alumno por ejercicio** para el tutor IA, **100 req/min** general.
 
 ```python
 # infrastructure/redis/rate_limiter.py
 
 import time
 from redis.asyncio import Redis
-from app.infrastructure.redis.keys import key_ratelimit
+from app.infrastructure.redis.keys import key_tutor_ratelimit, key_login_ratelimit
 
 async def check_rate_limit(
     redis: Redis,
-    user_id: str,
-    endpoint: str,
+    key: str,
     limit: int,
     window_seconds: int,
 ) -> tuple[bool, int]:
@@ -79,7 +78,6 @@ async def check_rate_limit(
     Sliding window rate limiter. Retorna (allowed, remaining).
     Ejemplo: limit=30, window_seconds=3600 → tutor endpoint.
     """
-    key = key_ratelimit(user_id, endpoint)
     now = time.time()
     window_start = now - window_seconds
 
@@ -94,6 +92,14 @@ async def check_rate_limit(
     allowed = current_count <= limit
     remaining = max(0, limit - current_count)
     return allowed, remaining
+
+# Uso para tutor (por ejercicio):
+# key = key_tutor_ratelimit(user_id, exercise_id)
+# allowed, remaining = await check_rate_limit(redis, key, limit=30, window_seconds=3600)
+
+# Uso para login (por IP):
+# key = key_login_ratelimit(request.client.host)
+# allowed, remaining = await check_rate_limit(redis, key, limit=10, window_seconds=300)
 ```
 
 ### 3. Token Blacklist con TTL = Vida Restante del Token
@@ -123,48 +129,83 @@ async def is_token_blacklisted(redis: Redis, jti: str) -> bool:
     return await redis.exists(key) == 1
 ```
 
-### 4. Pub/Sub para Event Bus entre Fases
+### 4. Redis Streams para Event Bus entre Fases
 
-Phase 1 (ingesta CTR) y Phase 2 (evaluación N4) publican eventos.
-Phase 3 (análisis agregado) suscribe y procesa.
+El event bus inter-fases usa **Redis Streams**, no Pub/Sub. Los Streams garantizan persistencia,
+grupos de consumidores y acknowledgment. Pub/Sub es solo para multiplexing WS entre workers.
+
+Streams canónicos: `events:submissions`, `events:tutor`, `events:code`, `events:cognitive`
 
 ```python
 # infrastructure/redis/event_bus.py
 
 import json
 from redis.asyncio import Redis
-from app.infrastructure.redis.keys import key_event
+
+# Streams canónicos del sistema
+STREAM_SUBMISSIONS = "events:submissions"
+STREAM_TUTOR       = "events:tutor"
+STREAM_CODE        = "events:code"
+STREAM_COGNITIVE   = "events:cognitive"
 
 async def publish_event(
     redis: Redis,
-    source: str,
-    event_type: str,
+    stream: str,
     payload: dict,
-) -> None:
+) -> str:
     """
-    Publica un evento en el canal ainative:events:{source}:{event_type}.
-    Ejemplo: source="ctr", event_type="hash_verified"
+    Publica un evento en el stream especificado.
+    Retorna el ID del mensaje generado por Redis.
+    Ejemplo: stream=STREAM_TUTOR, payload={"event_type": "interaction_saved", ...}
     """
-    channel = key_event(source, event_type)
-    await redis.publish(channel, json.dumps(payload))
+    message_id = await redis.xadd(stream, {"data": json.dumps(payload)})
+    return message_id
 
-async def subscribe_phase3(redis: Redis) -> None:
-    """Consumidor de Phase 3: suscribe a eventos de ctr y evaluacion."""
-    pubsub = redis.pubsub()
-    await pubsub.psubscribe(
-        key_event("ctr", "*"),
-        key_event("evaluacion", "*"),
+async def consume_events(
+    redis: Redis,
+    stream: str,
+    group: str,
+    consumer: str,
+    count: int = 10,
+) -> list[tuple[str, dict]]:
+    """
+    Consume eventos de un stream con consumer group.
+    Retorna lista de (message_id, payload).
+    El caller es responsable de hacer XACK después de procesar.
+    """
+    # Crear el grupo si no existe (MKSTREAM crea el stream si no existe)
+    try:
+        await redis.xgroup_create(stream, group, id="0", mkstream=True)
+    except Exception:
+        pass  # el grupo ya existe
+
+    messages = await redis.xreadgroup(
+        groupname=group,
+        consumername=consumer,
+        streams={stream: ">"},  # ">" = solo mensajes no entregados
+        count=count,
+        block=5000,  # esperar hasta 5s si no hay mensajes
     )
-    async for message in pubsub.listen():
-        if message["type"] != "pmessage":
-            continue
-        channel: str = message["channel"].decode()
-        data: dict = json.loads(message["data"])
-        await _handle_phase3_event(channel, data)
 
-async def _handle_phase3_event(channel: str, data: dict) -> None:
-    # Dispatcher por canal
-    ...
+    result = []
+    if messages:
+        for _, msgs in messages:
+            for msg_id, data in msgs:
+                payload = json.loads(data[b"data"])
+                result.append((msg_id, payload))
+    return result
+
+async def ack_event(redis: Redis, stream: str, group: str, message_id: str) -> None:
+    """Confirma el procesamiento de un evento (elimina del PEL)."""
+    await redis.xack(stream, group, message_id)
+
+# Ejemplo de consumidor Phase 3 (cognitive analytics):
+# async def phase3_worker(redis: Redis) -> None:
+#     while True:
+#         events = await consume_events(redis, STREAM_COGNITIVE, "phase3", "worker-1")
+#         for msg_id, payload in events:
+#             await _handle_cognitive_event(payload)
+#             await ack_event(redis, STREAM_COGNITIVE, "phase3", msg_id)
 ```
 
 ## Anti-patrones
@@ -206,12 +247,12 @@ await redis.setex(key_cache("user", user_id), TTL_CACHE_USER, json.dumps(user_da
 
 ```python
 # MAL — propenso a errores, difícil de refactorizar
-key = "ainative:" + domain + ":" + user_id + ":" + endpoint
+key = "rl:tutor:" + user_id + ":" + exercise_id
 ```
 
 ```python
 # BIEN — siempre la builder function centralizada
-key = key_ratelimit(user_id, endpoint)
+key = key_tutor_ratelimit(user_id, exercise_id)
 ```
 
 ## Checklist
@@ -219,9 +260,10 @@ key = key_ratelimit(user_id, endpoint)
 - [ ] Toda clave Redis usa la builder function correspondiente de `redis/keys.py`
 - [ ] Toda clave nueva tiene TTL explícito definido como constante nombrada
 - [ ] No hay ninguna llamada a `redis.keys()` en el codebase (usar `redis.scan()`)
-- [ ] Rate limiter de tutor usa `limit=30, window_seconds=3600`
-- [ ] Rate limiter general usa `limit=100, window_seconds=60`
+- [ ] Rate limiter de tutor usa `key_tutor_ratelimit(user_id, exercise_id)`, `limit=30, window_seconds=3600`
+- [ ] Rate limiter de login usa `key_login_ratelimit(ip)`, `limit=10, window_seconds=300`
 - [ ] La blacklist de tokens usa `ttl = exp - now` (no TTL fijo)
-- [ ] Pub/Sub usa `psubscribe` con el patrón `key_event(source, "*")` para flexibilidad
+- [ ] El event bus inter-fases usa Redis Streams (`xadd` / `xreadgroup` / `xack`)
+- [ ] Pub/Sub solo se usa para multiplexing WS entre workers uvicorn (no para el event bus)
+- [ ] Los streams canónicos son: `events:submissions`, `events:tutor`, `events:code`, `events:cognitive`
 - [ ] Los pipelines se usan con `async with redis.pipeline(transaction=True)`
-- [ ] El channel de eventos sigue el patrón `ainative:events:{source}:{event_type}`

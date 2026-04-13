@@ -558,8 +558,8 @@ Esta es la regla más importante del proyecto después de la calidad del código
 
 | Schema PostgreSQL | Fase dueña | Fases que leen |
 |-------------------|------------|----------------|
-| `operational` | Fase 0 + Fase 1 | Fase 2, Fase 3 (vía REST), Fase 4 |
-| `governance` | Fase 2 | Fase 3 (vía REST) |
+| `operational` | Fase 0 + Fase 1 + Fase 2 (tutor_interactions) | Fase 3 (vía REST), Fase 4 |
+| `governance` | Fase 3 | Fase 2 (vía REST) |
 | `cognitive` | Fase 3 | Fase 4 (vía REST) |
 | `analytics` | Fase 3 | Fase 4 (vía REST) |
 

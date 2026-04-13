@@ -149,7 +149,7 @@ Authorization: Bearer <access_token>
 {
   "sub": "uuid-usuario",
   "email": "alumno@universidad.edu.ar",
-  "role": "student",
+  "role": "alumno",
   "iat": 1712345678,
   "exp": 1712346578,
   "jti": "uuid-token-id"
@@ -160,8 +160,8 @@ Authorization: Bearer <access_token>
 
 | Rol | Descripción | Acceso |
 |-----|-------------|--------|
-| `student` | Alumno inscripto | Sus propios datos, ejercicios de sus comisiones |
-| `teacher` | Docente | Sus comisiones, datos de sus estudiantes |
+| `alumno` | Alumno inscripto | Sus propios datos, ejercicios de sus comisiones |
+| `docente` | Docente | Sus comisiones, datos de sus estudiantes |
 | `admin` | Administrador | Todo |
 
 ### WebSocket — Autenticación
@@ -190,8 +190,7 @@ Registro de nuevo usuario.
 {
   "email": "juan@universidad.edu.ar",
   "password": "securePassword123!",
-  "full_name": "Juan Pérez",
-  "role": "student"
+  "full_name": "Juan Pérez"
 }
 ```
 
@@ -200,26 +199,21 @@ Registro de nuevo usuario.
 | `email` | string | Sí | Formato email válido, dominio universitario |
 | `password` | string | Sí | Min 8 chars, al menos 1 número y 1 mayúscula |
 | `full_name` | string | Sí | Min 2 chars, max 255 chars |
-| `role` | enum | No | `student` (default) o `teacher` |
 
 **Response 201**:
 ```json
 {
   "status": "ok",
   "data": {
-    "user": {
-      "id": "uuid-...",
-      "email": "juan@universidad.edu.ar",
-      "full_name": "Juan Pérez",
-      "role": "student",
-      "created_at": "2026-04-10T12:00:00Z"
-    },
-    "access_token": "eyJhbGc...",
-    "token_type": "Bearer",
-    "expires_in": 900
+    "id": "uuid-...",
+    "email": "juan@universidad.edu.ar",
+    "full_name": "Juan Pérez",
+    "role": "alumno"
   }
 }
 ```
+
+> **Nota**: No se envían tokens en el registro — requiere login explícito para evitar abuso por bots.
 
 **Errores posibles**:
 - `409 CONFLICT` → `EMAIL_ALREADY_EXISTS`
@@ -232,7 +226,7 @@ Registro de nuevo usuario.
 Login con credenciales.
 
 **Auth requerida**: No  
-**Rate limit**: 10 req/min por IP, 5 intentos fallidos → bloqueo 15min
+**Rate limit**: 10 req/5min por IP (clave `rl:login:{ip}`)
 
 **Request Body**:
 ```json
@@ -251,7 +245,7 @@ Login con credenciales.
       "id": "uuid-...",
       "email": "juan@universidad.edu.ar",
       "full_name": "Juan Pérez",
-      "role": "student"
+      "role": "alumno"
     },
     "access_token": "eyJhbGc...",
     "token_type": "Bearer",
@@ -400,7 +394,7 @@ Soft delete de un curso (marca `is_active = false`).
 
 **Auth requerida**: Bearer token (rol `admin`)
 
-**Response 200**: `{ "message": "Curso desactivado." }`
+**Response 204**: No Content.
 
 ---
 
@@ -423,7 +417,7 @@ Lista comisiones de un curso.
 
 Crea una comisión para el curso.
 
-**Auth requerida**: Bearer token (rol `admin` o `teacher`)
+**Auth requerida**: Bearer token (rol `admin` o `docente`)
 
 **Request Body**:
 ```json
@@ -468,7 +462,7 @@ Obtiene detalle de una comisión.
 
 Actualiza una comisión.
 
-**Auth requerida**: Bearer token (rol `admin` o teacher owner)
+**Auth requerida**: Bearer token (rol `admin` o docente owner)
 
 **Response 200**: CommissionResponse actualizado.
 
@@ -482,7 +476,7 @@ Actualiza una comisión.
 
 Inscribe al usuario autenticado en una comisión.
 
-**Auth requerida**: Bearer token (rol `student`)
+**Auth requerida**: Bearer token (rol `alumno`)
 
 **Request Body**: No body (el estudiante se inscribe a sí mismo).
 
@@ -509,7 +503,7 @@ Inscribe al usuario autenticado en una comisión.
 
 Lista los estudiantes inscriptos en una comisión.
 
-**Auth requerida**: Bearer token (rol `teacher` o `admin`)  
+**Auth requerida**: Bearer token (rol `docente` o `admin`)  
 **Rate limit**: 30 req/min
 
 **Response 200**: Lista de EnrollmentResponse con datos del estudiante.
@@ -520,9 +514,9 @@ Lista los estudiantes inscriptos en una comisión.
 
 Baja de un estudiante (soft delete, `is_active = false`).
 
-**Auth requerida**: Bearer token (rol `admin` o teacher owner)
+**Auth requerida**: Bearer token (rol `admin` o docente owner)
 
-**Response 200**: `{ "message": "Inscripción cancelada." }`
+**Response 204**: No Content.
 
 ---
 
@@ -545,7 +539,7 @@ Lista ejercicios de una comisión.
 
 Crea un ejercicio para la comisión.
 
-**Auth requerida**: Bearer token (teacher owner o admin)
+**Auth requerida**: Bearer token (docente owner o admin)
 
 **Request Body**:
 ```json
@@ -575,7 +569,7 @@ Obtiene el detalle de un ejercicio.
 
 **Auth requerida**: Bearer token
 
-**Response 200**: ExerciseResponse. Los `test_cases` hidden solo se muestran a teachers/admins.
+**Response 200**: ExerciseResponse. Los `test_cases` hidden solo se muestran a docentes/admins.
 
 ---
 
@@ -583,7 +577,7 @@ Obtiene el detalle de un ejercicio.
 
 Actualiza un ejercicio.
 
-**Auth requerida**: Bearer token (teacher owner o admin)
+**Auth requerida**: Bearer token (docente owner o admin)
 
 **Response 200**: ExerciseResponse actualizado.
 
@@ -595,7 +589,7 @@ Soft delete de un ejercicio.
 
 **Auth requerida**: Bearer token (admin)
 
-**Response 200**: `{ "message": "Ejercicio desactivado." }`
+**Response 204**: No Content.
 
 ---
 
@@ -607,9 +601,9 @@ Soft delete de un ejercicio.
 
 Ejecuta código en el sandbox sin persistir como entrega. Para que el estudiante pruebe su código.
 
-**Auth requerida**: Bearer token (rol `student`, debe estar inscripto)  
+**Auth requerida**: Bearer token (rol `alumno`, debe estar inscripto)  
 **Rate limit**: 30 req/min por usuario  
-**Timeout de ejecución**: 5 segundos
+**Timeout de ejecución**: 10 segundos
 
 **Request Body**:
 ```json
@@ -660,7 +654,7 @@ Ejecuta código en el sandbox sin persistir como entrega. Para que el estudiante
 
 Envía una solución como entrega formal.
 
-**Auth requerida**: Bearer token (rol `student`, inscripto)  
+**Auth requerida**: Bearer token (rol `alumno`, inscripto)  
 **Rate limit**: 10 req/min por usuario por ejercicio
 
 **Request Body**:
@@ -692,7 +686,7 @@ La evaluación es asíncrona. El status final se puede consultar via GET.
 
 Lista las entregas del estudiante autenticado para un ejercicio.
 
-**Auth requerida**: Bearer token (rol `student`)
+**Auth requerida**: Bearer token (rol `alumno`)
 
 **Response 200**: Lista de SubmissionSummaryResponse.
 
@@ -702,7 +696,7 @@ Lista las entregas del estudiante autenticado para un ejercicio.
 
 Obtiene el detalle de una entrega.
 
-**Auth requerida**: Bearer token (student owner, teacher, o admin)
+**Auth requerida**: Bearer token (alumno owner, docente, o admin)
 
 **Response 200**:
 ```json
@@ -725,12 +719,12 @@ Obtiene el detalle de una entrega.
 
 ---
 
-#### POST /api/v1/student/submissions/{submission_id}/snapshots
+#### POST /api/v1/exercises/{exercise_id}/snapshots
 
-Guarda un snapshot del código en proceso (autosave del editor).
+Guarda un snapshot del código en proceso (autosave del editor). No requiere una submission previa — los snapshots se toman durante el proceso de resolución.
 
-**Auth requerida**: Bearer token (student owner)  
-**Rate limit**: 1 req/30seg por submission (throttled en frontend)
+**Auth requerida**: Bearer token (alumno, debe estar inscripto)  
+**Rate limit**: 1 req/30seg por estudiante por ejercicio (throttled en frontend)
 
 **Request Body**:
 ```json
@@ -763,7 +757,7 @@ Guarda un snapshot del código en proceso (autosave del editor).
 Conexión WebSocket para chat en streaming con el tutor socrático.
 
 **Auth requerida**: `?token=<access_token>` en query param  
-**Rate limit**: 1 sesión WS activa por usuario a la vez
+**Rate limit**: 30 msg/hora por alumno por ejercicio. 1 sesión WS activa por usuario a la vez.
 
 **Handshake (cliente → servidor)**:
 
@@ -790,29 +784,30 @@ Al conectarse, el cliente envía el contexto inicial:
 
 **Respuesta en streaming (servidor → cliente)**:
 
-El servidor envía múltiples mensajes de tipo `chunk` seguidos de `done`:
+El servidor envía múltiples mensajes de tipo `token` seguidos de `complete`:
 
 ```json
-{ "type": "chunk", "payload": { "content": "Interesante pregunta. " } }
-{ "type": "chunk", "payload": { "content": "¿Qué pasa si comparás " } }
-{ "type": "chunk", "payload": { "content": "dos elementos a la vez?" } }
-{ "type": "done", "payload": { "interaction_id": "uuid-...", "tokens_used": 87 } }
+{ "type": "token", "payload": { "text": "Interesante pregunta. " } }
+{ "type": "token", "payload": { "text": "¿Qué pasa si comparás " } }
+{ "type": "token", "payload": { "text": "dos elementos a la vez?" } }
+{ "type": "complete", "payload": { "interaction_id": "uuid-...", "tokens_used": 87 } }
 ```
 
 Si el guardrail bloquea la respuesta:
 ```json
 {
-  "type": "guardrail_blocked",
+  "type": "error",
   "payload": {
+    "code": "GUARDRAIL_BLOCKED",
     "reason": "La respuesta contenía una solución directa al ejercicio.",
     "alternative": "Pensá en qué comparación necesitás hacer entre dos elementos."
   }
 }
 ```
 
-**Cierre de conexión**:
+Si se supera el rate limit:
 ```json
-{ "type": "close", "payload": {} }
+{ "type": "rate_limit", "payload": { "retry_after_seconds": 120 } }
 ```
 
 **Códigos de cierre WS**:
@@ -820,11 +815,11 @@ Si el guardrail bloquea la respuesta:
 | Código | Descripción |
 |--------|-------------|
 | 1000 | Cierre normal |
-| 4001 | Token inválido o expirado |
-| 4002 | Ejercicio no encontrado o no disponible |
-| 4003 | El estudiante no está inscripto en la comisión |
-| 4004 | Rate limit excedido |
-| 4005 | Sesión WS duplicada (ya hay una sesión activa) |
+| 4001 | Auth fallida (token inválido o expirado) |
+| 4002 | Sesión expirada (sesión cognitiva no encontrada o cerrada) |
+| 4003 | Rate limit excedido (30 msg/hora por alumno por ejercicio) |
+| 4004 | Mensaje con formato inválido (JSON malformado o type desconocido) |
+| 4005 | Error interno del servidor |
 
 ---
 
@@ -836,7 +831,7 @@ Si el guardrail bloquea la respuesta:
 
 El estudiante completa una reflexión guiada sobre el problema.
 
-**Auth requerida**: Bearer token (rol `student`)  
+**Auth requerida**: Bearer token (rol `alumno`)  
 **Rate limit**: 5 req/hora por ejercicio
 
 **Request Body**:
@@ -879,7 +874,7 @@ El estudiante completa una reflexión guiada sobre el problema.
 
 Lista las interacciones con el tutor, filtradas.
 
-**Auth requerida**: Bearer token (rol `teacher` o `admin`)  
+**Auth requerida**: Bearer token (rol `docente` o `admin`)  
 **Rate limit**: 30 req/min
 
 **Query Params**:
@@ -1001,7 +996,7 @@ Elimina un system prompt (solo si no está activo).
 
 Inicia una sesión cognitiva para un ejercicio.
 
-**Auth requerida**: Bearer token (rol `student`)  
+**Auth requerida**: Bearer token (rol `alumno`)  
 **Rate limit**: 10 req/hora por usuario
 
 **Request Body**:
@@ -1034,7 +1029,7 @@ Inicia una sesión cognitiva para un ejercicio.
 
 Cierra una sesión cognitiva y calcula las métricas finales.
 
-**Auth requerida**: Bearer token (student owner)
+**Auth requerida**: Bearer token (alumno owner)
 
 **Request Body**: No body.
 
@@ -1069,7 +1064,7 @@ Cierra una sesión cognitiva y calcula las métricas finales.
 
 Registra un evento cognitivo en la cadena CTR.
 
-**Auth requerida**: Bearer token (rol `student`)  
+**Auth requerida**: Bearer token (rol `alumno`)  
 **Rate limit**: 60 req/min (alta frecuencia — autosave y snapshots son eventos)
 
 **Request Body**:
@@ -1113,7 +1108,7 @@ Registra un evento cognitivo en la cadena CTR.
 
 Dashboard general del curso con métricas agregadas.
 
-**Auth requerida**: Bearer token (teacher owner o admin)  
+**Auth requerida**: Bearer token (docente owner o admin)  
 **Rate limit**: 10 req/min (query intensiva)
 
 **Query Params**: `commission_id`, `date_from`, `date_to`
@@ -1158,7 +1153,7 @@ Dashboard general del curso con métricas agregadas.
 
 Perfil cognitivo detallado de un estudiante.
 
-**Auth requerida**: Bearer token (teacher del curso o admin)  
+**Auth requerida**: Bearer token (docente del curso o admin)  
 **Rate limit**: 30 req/min
 
 **Query Params**: `commission_id`
@@ -1213,7 +1208,7 @@ Perfil cognitivo detallado de un estudiante.
 
 Obtiene la traza completa CTR de una sesión cognitiva.
 
-**Auth requerida**: Bearer token (teacher del curso o admin)  
+**Auth requerida**: Bearer token (docente del curso o admin)  
 **Rate limit**: 20 req/min
 
 **Query Params**: `verify_integrity` (boolean, default false)
@@ -1264,7 +1259,7 @@ Si `verify_integrity=true` y la cadena está comprometida:
 
 Analiza los patrones cognitivos de todos los estudiantes en un ejercicio.
 
-**Auth requerida**: Bearer token (teacher o admin)  
+**Auth requerida**: Bearer token (docente o admin)  
 **Rate limit**: 5 req/min (query muy intensiva)
 
 **Query Params**: `commission_id`
@@ -1341,8 +1336,7 @@ Rate limiting implementado con Redis usando el algoritmo **Token Bucket** por us
 | Endpoint | Límite | Ventana | Scope |
 |----------|--------|---------|-------|
 | `POST /auth/register` | 5 req | 1 min | Por IP |
-| `POST /auth/login` | 10 req | 1 min | Por IP |
-| `POST /auth/login` (fallidos) | 5 intentos | 15 min | Por IP + email |
+| `POST /auth/login` | 10 req | 5 min | Por IP (clave `rl:login:{ip}`) |
 | `POST /student/exercises/{id}/run` | 30 req | 1 min | Por usuario |
 | `POST /student/exercises/{id}/submit` | 10 req | 1 min | Por usuario + ejercicio |
 | `WS /ws/tutor/chat` | 1 conexión activa | — | Por usuario |

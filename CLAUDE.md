@@ -10,6 +10,12 @@ Sistema pedagógico-tecnológico para enseñanza de programación universitaria 
 
 **Solución**: Pasar de evaluar productos (`E = correctness(output)`) a observar procesos cognitivos (`E = f(N1, N2, N3, N4, Qe)`).
 
+**Modelo N4** (niveles de observación cognitiva):
+- **N1 — Comprensión**: ¿El alumno entiende el problema?
+- **N2 — Estrategia**: ¿El alumno puede planificar una solución?
+- **N3 — Validación**: ¿El alumno verifica y corrige su razonamiento?
+- **N4 — Interacción con IA**: ¿El alumno usa la IA críticamente o como oráculo?
+
 ## Tech Stack
 
 | Componente | Puerto | Tecnología |
@@ -21,7 +27,7 @@ Sistema pedagógico-tecnológico para enseñanza de programación universitaria 
 | LLM | — | Anthropic API (Claude) |
 
 **Prerequisitos**: Python 3.12+, Node.js 20+, Docker + Docker Compose, PostgreSQL 16, Redis 7
-**Variables críticas**: `DATABASE_URL`, `REDIS_URL`, `ANTHROPIC_API_KEY`, `JWT_SECRET_KEY`, `APP_SECRET_KEY`
+**Variables críticas**: `DATABASE_URL`, `REDIS_URL`, `ANTHROPIC_API_KEY`, `SECRET_KEY`
 
 ## Modelo de Datos (resumen)
 
@@ -40,10 +46,15 @@ CognitiveSession → CognitiveMetrics (1:1)
 CognitiveSession → ReasoningRecord (1:N)
 Student → RiskAssessment (1:N)
 
-[Schema: operational + governance]
+[Schema: operational — owner: Fase 2]
 Student + Exercise → TutorInteraction (1:N, dentro de CognitiveSession)
+
+[Schema: governance]
 TutorSystemPrompt (versionado con SHA-256)
 GovernanceEvent (policy violations, prompt updates, model changes)
+
+NOTA: Fase 2 escribe en operational (tutor_interactions). Fase 2 NO escribe en cognitive.
+El schema cognitive es owned EXCLUSIVAMENTE por Fase 3.
 ```
 
 Detalle: `knowledge-base/02-arquitectura/02_modelo_de_datos.md`
@@ -85,7 +96,7 @@ Router (thin — HTTP/WS only)
 3. Funciones de ruta: validar input (Pydantic), llamar service, retornar response. Nada más.
 4. Usar `status_code=` como parámetro, nunca hardcodear status en el body.
 5. Path params para identidad del recurso, query params para filtros, body para mutaciones.
-6. Paginación: `skip`/`limit` con máximos sensatos, nunca queries sin límite.
+6. Paginación: `page`/`per_page` con máximos sensatos, nunca queries sin límite.
 
 **Domain Service Layer**
 7. TODA lógica de negocio vive en domain services — validación, autorización, orquestación.
@@ -110,13 +121,13 @@ Router (thin — HTTP/WS only)
 **General**
 21. Logging estructurado via logger del proyecto, NUNCA `print()`.
 22. Pydantic v2 para TODOS los boundaries de API — `model_config = ConfigDict(from_attributes=True)`.
-23. Soft delete via `is_active: bool` o `deleted_at: datetime | None` — hard delete solo para registros efímeros. **Excepción**: eventos del CTR son inmutables (hash chain).
+23. Soft delete via `is_active: bool` o `deleted_at: datetime | None` — hard delete solo para registros efímeros. **Excepción**: eventos del CTR y `code_snapshots` son inmutables (evidencia de proceso, no se pueden modificar ni eliminar).
 24. Alembic auto-generate para migraciones, siempre revisar antes de aplicar.
-25. Formato de respuesta estándar: `{ status: "ok"|"error", data: {}, meta: { page, total, per_page }, errors: [{ code, message, field }] }`.
+25. Formato de respuesta estándar: `{ status: "ok"|"error", data: {}, meta: { page, total, per_page, total_pages }, errors: [{ code, message, field }] }`.
 
 ### Reglas del Dominio AI-Native
 
-26. El tutor NUNCA entrega soluciones completas. Máximo 3-5 líneas de código parcial y contextual.
+26. El tutor NUNCA entrega soluciones completas. Máximo 5 líneas de código parcial y contextual.
 27. Toda evaluación se deriva del modelo N4: `E = f(N1, N2, N3, N4, Qe)`. NUNCA `E = correctness(output)`.
 28. Todo evento cognitivo incluye contexto (tiempo, problema, estado del estudiante). No hay dato sin contexto.
 29. Toda interacción con IA se registra: prompt, respuesta, clasificación N4.
@@ -179,17 +190,18 @@ Router (thin — HTTP/WS only)
 | WebSocket (tutor) | JWT | Query param `?token=` en handshake |
 
 **Roles**: alumno, docente, admin
-**Rate limiting**: 30 msg/hora por alumno al tutor, 100 req/min general
+**Rate limiting**: 30 msg/hora por alumno al tutor **por ejercicio**, 100 req/min general
+**Token storage**: access token en Zustand memory, refresh token en httpOnly cookie
 
 Detalle: `knowledge-base/03-seguridad/01_modelo_de_seguridad.md`
 
 ## RBAC
 
-| Rol | Cursos | Ejercicios | Submissions | Tutor | Métricas Cognitivas | Governance |
-|-----|--------|-----------|-------------|-------|-------------------|-----------|
-| alumno | ver propios | ver + resolver | crear + ver propias | chatear | ver propias | — |
-| docente | gestionar | gestionar | ver todas (su comisión) | — | ver todas (su comisión) | ver reportes |
-| admin | gestionar todo | gestionar todo | ver todas | — | ver todas | gestionar todo |
+| Rol | Cursos | Ejercicios | Submissions | Tutor | Métricas Cognitivas | Traza CTR | Governance |
+|-----|--------|-----------|-------------|-------|-------------------|-----------|-----------|
+| alumno | ver propios | ver + resolver | crear + ver propias | chatear | ver propias (scores agregados) | — | — |
+| docente | gestionar | gestionar | ver todas (su comisión) | ver sesiones (su comisión) | ver todas (su comisión) | ver (su comisión) | ver reportes |
+| admin | gestionar todo | gestionar todo | ver todas | ver sesiones (todas) | ver todas | ver todas | gestionar todo |
 
 ## Gobernanza de Cambios
 
@@ -212,7 +224,7 @@ Detalle: `knowledge-base/03-seguridad/01_modelo_de_seguridad.md`
 - **WebSocket para streaming del tutor** — respuestas token por token, UX conversacional
 - **Sandbox aislado para ejecución de código** — subprocess con timeout 10s, 128MB RAM, sin red, sin filesystem fuera de /tmp
 - **SHA-256 del prompt en cada interacción** — reconstrucción criptográfica del contexto exacto del tutor
-- **Event bus entre fases** — desacople de producción/consumo de eventos cognitivos
+- **Event bus entre fases (Redis Streams)** — desacople de producción/consumo de eventos cognitivos
 - **MSW para desarrollo paralelo del frontend** — mocks basados en OpenAPI spec, se remueve en integración
 
 ## Mapa de Navegación

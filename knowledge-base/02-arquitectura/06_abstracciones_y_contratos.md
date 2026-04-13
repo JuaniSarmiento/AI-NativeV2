@@ -44,23 +44,25 @@ El objetivo no es "desacoplar todo" sino desacoplar las partes que tienen razone
 
 ```
 app/
-├── phase1/         # Ejercicios, ejecución de código, submissions
-│   ├── domain/     # Entidades, value objects, domain events
-│   ├── services/   # Lógica de negocio (la interfaz pública del módulo)
-│   ├── repos/      # Acceso a datos (privado al módulo)
-│   └── routers/    # HTTP endpoints (contratos REST)
-├── phase2/         # Tutor IA, sesiones de chat
-├── phase3/         # Clasificación cognitiva, CTR
-├── phase4/         # Gobernanza, analytics
-└── shared/         # Abstracciones compartidas (bases, excepciones, event bus)
+├── features/
+│   ├── auth/           # Autenticación, JWT, RBAC
+│   ├── courses/        # Cursos, comisiones, inscripciones
+│   ├── exercises/      # Ejercicios, submissions, snapshots
+│   ├── sandbox/        # Ejecución aislada de código
+│   ├── tutor/          # Tutor socrático IA, streaming WS
+│   ├── cognitive/      # Clasificación cognitiva, CTR, hash chain
+│   ├── evaluation/     # Motor de evaluación N4
+│   └── governance/     # Gobernanza, prompts, auditoría
+├── core/               # Excepciones, logging, event bus
+└── shared/             # DB session, UoW, models, repositories base
 ```
 
 **Regla de dependencias (unidireccional):**
 ```
-phase1, phase2 → shared
-phase3 → shared (consume eventos de phase1, phase2 via event bus)
-phase4 → shared (lee analytics de phase3 via REST)
-NUNCA: phase1 importa de phase2, etc.
+auth, courses, exercises, sandbox, tutor → shared (operational schema)
+cognitive, evaluation → shared (cognitive schema, consume eventos via event bus)
+governance → shared (governance schema)
+NUNCA: exercises importa de cognitive directamente, etc.
 ```
 
 ---
@@ -109,11 +111,12 @@ def custom_openapi():
         description=app.description,
         routes=app.routes,
         tags=[
-            {"name": "phase1", "description": "Ejercicios y ejecución de código"},
-            {"name": "phase2", "description": "Tutor IA y sesiones de chat"},
-            {"name": "phase3", "description": "Clasificación cognitiva y CTR"},
-            {"name": "phase4", "description": "Gobernanza y analytics"},
             {"name": "auth", "description": "Autenticación y autorización"},
+            {"name": "courses", "description": "Cursos, comisiones e inscripciones"},
+            {"name": "exercises", "description": "Ejercicios, submissions y sandbox"},
+            {"name": "tutor", "description": "Tutor IA socrático y streaming WS"},
+            {"name": "cognitive", "description": "Clasificación cognitiva y CTR"},
+            {"name": "governance", "description": "Gobernanza, prompts y analytics"},
         ],
     )
 
@@ -131,13 +134,12 @@ Cada tabla en PostgreSQL pertenece a exactamente un módulo. Solo ese módulo pu
 
 ### 3.1 Tabla de Propiedad
 
-| Schema PostgreSQL | Módulo propietario | Lectura por otros módulos |
-|-------------------|--------------------|---------------------------|
-| `operational.*`   | Phase 1            | Via REST `/api/v1/phase1/` |
-| `cognitive.*`     | Phase 3            | Via REST `/api/v1/phase3/` |
-| `governance.*`    | Phase 4            | Via REST `/api/v1/phase4/` |
-| `analytics.*`     | Phase 4            | Via REST `/api/v1/analytics/` |
-| `public.*`        | Shared (auth)      | Todos (auth es transversal) |
+| Schema PostgreSQL | Módulo propietario (escribe)               | Lectura por otros módulos |
+|-------------------|--------------------------------------------|---------------------------|
+| `operational`     | features/auth, courses, exercises, sandbox, tutor (Fases 0-2) | features/cognitive (via REST) |
+| `cognitive`       | features/cognitive, evaluation (Fase 3 únicamente) | features/governance (via REST) |
+| `governance`      | features/governance (Fase 3)               | features/tutor (lee prompt activo via REST) |
+| `analytics`       | features/evaluation, governance (Fase 3)   | Docentes via API endpoints |
 
 ### 3.2 Enforcement en Código
 
@@ -179,8 +181,8 @@ T = TypeVar("T")
 
 class PaginationMeta(BaseModel):
     page: int
-    page_size: int
-    total_items: int
+    per_page: int
+    total: int
     total_pages: int
 
 
@@ -198,7 +200,7 @@ class ApiResponse(BaseModel, Generic[T]):
     Envelope estándar para todas las respuestas REST.
 
     Ejemplo exitoso:
-        { "status": "success", "data": {...}, "meta": null, "errors": [] }
+        { "status": "ok", "data": {...}, "meta": null, "errors": [] }
 
     Ejemplo de error:
         { "status": "error", "data": null, "meta": null,
@@ -206,8 +208,8 @@ class ApiResponse(BaseModel, Generic[T]):
     """
 
     status: str = Field(
-        description="'success' o 'error'",
-        examples=["success", "error"],
+        description="'ok' o 'error'",
+        examples=["ok", "error"],
     )
     data: T | None = Field(
         default=None,
@@ -224,7 +226,7 @@ class ApiResponse(BaseModel, Generic[T]):
 
 
 def success(data: Any, meta: Any = None) -> ApiResponse:
-    return ApiResponse(status="success", data=data, meta=meta, errors=[])
+    return ApiResponse(status="ok", data=data, meta=meta, errors=[])
 
 
 def error(
@@ -242,14 +244,14 @@ def error(
 ### 4.2 Uso en un Endpoint
 
 ```python
-# app/phase1/routers/exercises.py
+# app/features/exercises/router.py
 
 from fastapi import APIRouter, HTTPException
-from app.shared.schemas.response import ApiResponse, success, error
-from app.phase1.schemas.exercise import ExerciseResponse, ExerciseCreateRequest
-from app.phase1.services.exercise_service import ExerciseService
+from app.shared.schemas.responses import ApiResponse, success, error
+from app.features.exercises.schemas import ExerciseResponse, ExerciseCreateRequest
+from app.features.exercises.service import ExerciseService
 
-router = APIRouter(prefix="/api/v1/phase1", tags=["phase1"])
+router = APIRouter(prefix="/api/v1", tags=["exercises"])
 
 @router.get(
     "/exercises/{exercise_id}",
@@ -275,7 +277,7 @@ async def get_exercise(
 // src/types/api-response.ts (auto-generado + manual para generics)
 
 export interface ApiResponse<T> {
-  status: "success" | "error";
+  status: "ok" | "error";
   data: T | null;
   meta: PaginationMeta | Record<string, unknown> | null;
   errors: ErrorDetail[];
@@ -283,8 +285,8 @@ export interface ApiResponse<T> {
 
 export interface PaginationMeta {
   page: number;
-  page_size: number;
-  total_items: number;
+  per_page: number;
+  total: number;
   total_pages: number;
 }
 
@@ -318,7 +320,7 @@ Los schemas Pydantic son el contrato entre la capa HTTP y la capa de servicios. 
 ### 5.2 Ejemplo: Schema de Ejercicio
 
 ```python
-# app/phase1/schemas/exercise.py
+# app/features/exercises/schemas.py
 
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
@@ -391,7 +393,7 @@ class ExerciseSummary(BaseModel):
 ### 5.3 Schema de Submission
 
 ```python
-# app/phase1/schemas/submission.py
+# app/features/exercises/schemas_submission.py
 
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -417,7 +419,7 @@ class SubmissionResponse(BaseModel):
     student_id: str
     code: str
     status: str   # "pending" | "running" | "passed" | "failed" | "error"
-    score: int | None
+    score: float | None  # NUMERIC(5,2) → 0.00 a 100.00
     test_results: list[TestResultSchema]
     stdout: str
     stderr: str
@@ -470,15 +472,15 @@ type ExerciseCreateRequest = components["schemas"]["ExerciseCreateRequest"];
 type SubmissionResponse = components["schemas"]["SubmissionResponse"];
 
 // Path types para verificar que los endpoints existen en el contrato
-type GetExercisePath = paths["/api/v1/phase1/exercises/{exercise_id}"]["get"];
+type GetExercisePath = paths["/api/v1/exercises/{exercise_id}"]["get"];
 type GetExerciseResponse = GetExercisePath["responses"]["200"]["content"]["application/json"];
 
 export const exerciseApi = {
   async getById(id: string): Promise<ExerciseResponse> {
-    const res = await fetch(`/api/v1/phase1/exercises/${id}`);
+    const res = await fetch(`/api/v1/exercises/${id}`);
     const body: GetExerciseResponse = await res.json();
 
-    if (body.status === "error") {
+    if (body.status !== "ok") {
       throw new ApiError(body.errors[0].code, body.errors[0].message);
     }
 
@@ -486,7 +488,7 @@ export const exerciseApi = {
   },
 
   async create(data: ExerciseCreateRequest): Promise<ExerciseResponse> {
-    const res = await fetch("/api/v1/phase1/exercises", {
+    const res = await fetch("/api/v1/exercises", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -584,7 +586,7 @@ from app.config import settings
 class AnthropicAdapter:
     """Adaptador para Anthropic Claude via SDK oficial."""
 
-    def __init__(self, model: str = "claude-opus-4-5"):
+    def __init__(self, model: str = "claude-sonnet-4-20250514"):
         self._client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
         self._model = model
 
@@ -895,10 +897,19 @@ class BaseRepository(ABC, Generic[ModelT]):
         await self._db.refresh(instance)
         return instance
 
-    async def delete(self, id: str | UUID) -> None:
-        """Elimina una entidad. Lanza NotFoundError si no existe."""
-        instance = await self.get_by_id(id)
-        await self._db.delete(instance)
+    async def soft_delete(self, id: str | UUID) -> None:
+        """
+        Soft delete: marca is_active = False.
+        Solo disponible en repositorios de entidades con soft delete.
+        Repos de tablas inmutables (cognitive_events, tutor_interactions, etc.)
+        NO heredan este método — las tablas inmutables no tienen is_active.
+        """
+        stmt = (
+            update(self.model)
+            .where(getattr(self.model, "id") == str(id))
+            .values(is_active=False)
+        )
+        await self._db.execute(stmt)
         await self._db.flush()
 
     async def exists(self, id: str | UUID) -> bool:
@@ -948,10 +959,11 @@ from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.phase1.repos.exercise_repo import ExerciseRepository
-from app.phase1.repos.submission_repo import SubmissionRepository
-from app.phase2.repos.tutor_session_repo import TutorSessionRepository
-from app.phase3.repos.ctr_repo import CTRRepository
+from app.shared.repositories.exercise_repo import ExerciseRepository
+from app.shared.repositories.submission_repo import SubmissionRepository
+from app.shared.repositories.tutor_repo import TutorInteractionRepository
+from app.shared.repositories.cognitive_repo import CognitiveRepository
+from app.shared.repositories.governance_repo import GovernanceRepository
 
 
 class UnitOfWork:
@@ -971,10 +983,10 @@ class UnitOfWork:
 
     async def __aenter__(self) -> "UnitOfWork":
         self._session = self._session_factory()
-        self.exercises = ExerciseRepository(self._session)
         self.submissions = SubmissionRepository(self._session)
-        self.tutor_sessions = TutorSessionRepository(self._session)
-        self.ctr = CTRRepository(self._session)
+        self.cognitive_events = CognitiveRepository(self._session)
+        self.tutor_interactions = TutorInteractionRepository(self._session)
+        self.governance_events = GovernanceRepository(self._session)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -1013,7 +1025,7 @@ class SubmissionService:
             exercise = await uow.exercises.get_by_id(exercise_id)
 
             # Verificar intentos disponibles
-            submission_count = await uow.submissions.count_by_student_and_exercise(
+            submission_count = await uow.submissions.count_by_student_exercise(
                 student_id, exercise_id
             )
             if submission_count >= exercise.max_attempts:
@@ -1226,24 +1238,24 @@ async def domain_error_handler(request: Request, exc: DomainError) -> JSONRespon
 Cuando Phase 3 necesita datos de Phase 1 o Phase 2, los solicita via REST. Los servicios que exponen datos a otros módulos tienen contratos explícitos en el schema OpenAPI.
 
 ```python
-# app/phase3/clients/phase1_client.py
+# app/features/cognitive/clients/exercises_client.py
 """
-Cliente HTTP interno para consumir la API de Phase 1.
-Phase 3 NUNCA importa directamente de phase1.*
+Cliente HTTP interno para consumir la API de exercises.
+features/cognitive NUNCA importa directamente de features/exercises.*
 """
 
 import httpx
 from app.config import settings
-from app.phase3.schemas.phase1_data import ExerciseSummary, SubmissionSummary
+from app.features.cognitive.schemas import ExerciseSummary, SubmissionSummary
 
 
-class Phase1Client:
+class ExercisesClient:
     """
-    Cliente para la API REST de Phase 1.
-    Desacopla Phase 3 de la implementación interna de Phase 1.
+    Cliente para la API REST de exercises.
+    Desacopla cognitive de la implementación interna de exercises.
     """
 
-    BASE_URL = f"http://localhost:{settings.APP_PORT}/api/v1/phase1"
+    BASE_URL = f"http://localhost:{settings.APP_PORT}/api/v1"
 
     def __init__(self):
         self._client = httpx.AsyncClient(
@@ -1253,7 +1265,7 @@ class Phase1Client:
         )
 
     async def get_exercise(self, exercise_id: str) -> ExerciseSummary:
-        response = await self._client.get(f"/exercises/{exercise_id}")
+        response = await self._client.get(f"/api/v1/exercises/{exercise_id}")
         response.raise_for_status()
         data = response.json()
         return ExerciseSummary(**data["data"])
@@ -1279,7 +1291,7 @@ class Phase1Client:
 Las invariantes son reglas que el dominio debe respetar en todo momento. Se implementan en la capa de dominio, no en la de presentación.
 
 ```python
-# app/phase1/domain/submission.py
+# app/features/exercises/domain/submission.py
 
 from dataclasses import dataclass
 from datetime import datetime

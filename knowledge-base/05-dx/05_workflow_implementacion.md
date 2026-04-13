@@ -210,7 +210,7 @@ class ExerciseRepository:
 ### 4.4 — Service
 
 ```python
-# backend/app/services/exercise_service.py
+# backend/app/features/exercises/service.py
 class ExerciseService:
     def __init__(self, repository: ExerciseRepository):
         self.repository = repository
@@ -236,7 +236,7 @@ class ExerciseService:
             total=total,
             page=page,
             per_page=per_page,
-            pages=math.ceil(total / per_page),
+            total_pages=math.ceil(total / per_page),
         )
 ```
 
@@ -288,7 +288,7 @@ export interface PaginatedExercisesResponse {
   total: number
   page: number
   perPage: number
-  pages: number
+  totalPages: number
 }
 ```
 
@@ -404,6 +404,7 @@ export function useExercises() {
 
 ```typescript
 // frontend/src/features/exercises/components/DifficultyFilter.tsx
+import { useShallow } from 'zustand/react/shallow'
 import { useExerciseStore } from '../stores/exerciseStore'
 
 const DIFFICULTIES = [
@@ -415,10 +416,12 @@ const DIFFICULTIES = [
 ] as const
 
 export function DifficultyFilter() {
-  const { difficulty, setFilters } = useExerciseStore((state) => ({
-    difficulty: state.filters.difficulty,
-    setFilters: state.setFilters,
-  }))
+  const { difficulty, setFilters } = useExerciseStore(
+    useShallow((state) => ({
+      difficulty: state.filters.difficulty,
+      setFilters: state.setFilters,
+    }))
+  )
   
   return (
     <select

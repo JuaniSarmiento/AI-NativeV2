@@ -57,11 +57,11 @@ async def get_user_with_exercises(user_id: UUID) -> User:
 # CORRECTO: joinedload (genera un JOIN, mejor para relaciones many-to-one)
 from sqlalchemy.orm import joinedload
 
-async def get_ctr_with_user(ctr_id: UUID) -> CognitiveTraceRecord:
+async def get_ctr_with_user(ctr_id: UUID) -> CognitiveEvent:
     result = await session.execute(
-        select(CognitiveTraceRecord)
-        .options(joinedload(CognitiveTraceRecord.user))
-        .where(CognitiveTraceRecord.id == ctr_id)
+        select(CognitiveEvent)
+        .options(joinedload(CognitiveEvent.user))
+        .where(CognitiveEvent.id == ctr_id)
     )
     return result.scalar_one()
 ```
@@ -84,7 +84,7 @@ query = select(Exercise).where(Exercise.deleted_at == None)
 # CORRECTO
 query = select(User).where(User.is_active.is_(True))
 query = select(Exercise).where(Exercise.deleted_at.is_(None))
-query = select(CognitiveTraceRecord).where(CognitiveTraceRecord.is_active.is_not(False))
+query = select(CognitiveEvent).where(CognitiveEvent.is_active.is_not(False))
 ```
 
 ### Session scope incorrecto en tests
@@ -189,7 +189,7 @@ def run_migrations_online():
             connection=connection,
             target_metadata=metadata,
             include_schemas=True,       # OBLIGATORIO para multi-schema
-            version_table_schema='operational',  # tabla alembic_version en schema operational
+            version_table_schema='public',  # tabla alembic_version en schema public
         )
 ```
 
@@ -238,12 +238,12 @@ async def websocket_endpoint(
 # CORRECTO
 @router.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
-    await websocket.accept()
     try:
         user = await authenticate_ws_token(token)
     except AuthenticationError:
         await websocket.close(code=4001, reason="Unauthorized")
         return
+    await websocket.accept()
     
     try:
         await handle_websocket_session(websocket, user)
@@ -387,19 +387,14 @@ El proyecto es una SPA pura (Single Page Application) con Vite. No se usan React
 
 **Problema**: Cuando un cliente WebSocket se desconecta y reconecta, la nueva conexión no tiene información del usuario anterior. No hay estado persistente en el servidor para identificar al cliente.
 
-**Solución**: El cliente debe enviar el token de autenticación como query param o en el primer mensaje tras conectar:
+**Solución**: El cliente debe enviar el token de autenticación como query param en la URL de conexión. Esta es la **única** forma soportada:
 
 ```typescript
-// En el cliente: siempre incluir el token en la URL
+// CORRECTO: token en query param
 const ws = new WebSocket(`${WS_BASE_URL}/ws/session?token=${accessToken}`)
-
-// O enviar como primer mensaje después de conectar
-ws.onopen = () => {
-  ws.send(JSON.stringify({ type: 'auth', token: accessToken }))
-}
 ```
 
-El servidor verifica el token en el primer mensaje antes de procesar cualquier otro evento.
+El servidor verifica el token durante el handshake, antes de aceptar la conexión. No se soporta enviar el token como primer mensaje post-conexión.
 
 ### No asumir que WebSocket está disponible
 
@@ -407,7 +402,7 @@ En entornos con proxies o firewalls institucionales (como redes universitarias),
 
 ### Heartbeat necesario para conexiones idle
 
-Las conexiones WebSocket idle pueden ser cerradas por proxies/load balancers después de un timeout (usualmente 30-60 segundos). El servidor envía pings cada 25 segundos y el cliente debe responder con pong:
+Las conexiones WebSocket idle pueden ser cerradas por proxies/load balancers después de un timeout (usualmente 30-60 segundos). El servidor envía pings cada 30 segundos y el cliente debe responder con pong:
 
 ```typescript
 // Cliente: responder a pings del servidor
@@ -474,7 +469,7 @@ El sistema tiene un job programado que verifica la integridad del hash chain. Si
 
 ### Timeout del sandbox debe ser conservador
 
-El timeout para ejecución de código de estudiantes está configurado en 5 segundos. Aumentarlo puede llevar a ataques de denegación de servicio (loops infinitos). Si un ejercicio legítimamente necesita más tiempo, hay que revisar el ejercicio, no el timeout.
+El timeout para ejecución de código de estudiantes está configurado en 10 segundos. Aumentarlo puede llevar a ataques de denegación de servicio (loops infinitos). Si un ejercicio legítimamente necesita más tiempo, hay que revisar el ejercicio, no el timeout.
 
 ### No confiar en el output del sandbox para lógica de negocio
 
@@ -564,13 +559,13 @@ assert response.json()["data"]["id"] == user.id       # puede fallar (UUID vs st
 
 ### JSONB vs JSON
 
-El proyecto usa `JSONB` (no `JSON`) para todos los campos de contenido variable (p.ej. `CognitiveTraceRecord.content`). `JSONB` es binario, indexable, y más eficiente para consultas. `JSON` conserva whitespace y orden original — no lo usamos.
+El proyecto usa `JSONB` (no `JSON`) para todos los campos de contenido variable (p.ej. `CognitiveEvent.content`). `JSONB` es binario, indexable, y más eficiente para consultas. `JSON` conserva whitespace y orden original — no lo usamos.
 
 ```python
 # Siempre JSONB en modelos SQLAlchemy
 from sqlalchemy.dialects.postgresql import JSONB
 
-class CognitiveTraceRecord(Base):
+class CognitiveEvent(Base):
     content: Mapped[dict] = mapped_column(JSONB, nullable=False)
 ```
 
@@ -597,12 +592,13 @@ async def stream_tutor_response(prompt: str):
 
 ### Rate limits y costos
 
-La API de Anthropic tiene rate limits por minuto y por día. En desarrollo, usar el modelo más pequeño posible (`claude-haiku-3-5`) para pruebas que no involucren calidad de respuesta. Usar `claude-opus-4-5` solo para tests de calidad del tutor.
+La API de Anthropic tiene rate limits por minuto y por día. En desarrollo, se puede usar un modelo más económico para pruebas que no involucren calidad de respuesta. Usar el modelo de producción solo para tests de calidad del tutor.
 
 Configurar `ANTHROPIC_MODEL` en `.env` según el contexto:
-- Desarrollo: `claude-haiku-3-5`
-- Testing de calidad: `claude-opus-4-5`
-- Producción: `claude-opus-4-5` (definir en variables de entorno de deploy)
+- Desarrollo y testing: `claude-sonnet-4-20250514`
+- Producción: `claude-sonnet-4-20250514` (definir en variables de entorno de deploy)
+
+> Usar siempre el nombre de modelo exacto. Los alias (`claude-sonnet-4`) pueden resolverse a versiones distintas entre llamadas.
 
 ---
 

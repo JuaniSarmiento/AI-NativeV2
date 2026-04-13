@@ -23,7 +23,7 @@ metadata:
 
 ### 1. Endpoint FastAPI con Auth JWT en el Handshake
 
-El token se valida **antes** de aceptar la conexión. Si falla, se cierra con código 1008.
+El token se valida **antes** de aceptar la conexión. Si falla, se cierra con código 4001.
 
 ```python
 # api/v1/ws/tutor.py
@@ -31,7 +31,7 @@ El token se valida **antes** de aceptar la conexión. Si falla, se cierra con c�
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
 from app.core.security import decode_access_token
 from app.infrastructure.redis.rate_limiter import check_rate_limit
-from app.infrastructure.redis.keys import key_ratelimit
+from app.infrastructure.redis.keys import key_tutor_ratelimit
 from app.dependencies import get_redis
 
 router = APIRouter()
@@ -45,18 +45,29 @@ async def tutor_ws(
     # 1. Validar JWT ANTES de aceptar
     payload = decode_access_token(token)
     if payload is None:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        # Código 4001: token inválido o expirado
+        # Códigos canónicos del sistema (rango 4000-4999, reservado para aplicación):
+        # 4001 — token inválido o expirado
+        # 4002 — sesión expirada o no encontrada
+        # 4003 — rate limit excedido
+        # 4004 — mensaje con formato inválido
+        # 4005 — error interno del servidor
+        await websocket.close(code=4001)
         return
 
     user_id: str = payload["sub"]
     redis = await get_redis()
 
-    # 2. Rate limit: 30 msg/hora para el tutor
+    # 2. Rate limit: 30 msg/hora por alumno por ejercicio
+    #    key canónica: rl:tutor:{user_id}:{exercise_id}
+    exercise_id: str = websocket.path_params.get("exercise_id", session_id)
+    from app.infrastructure.redis.keys import key_tutor_ratelimit
+    rl_key = key_tutor_ratelimit(user_id, exercise_id)
     allowed, remaining = await check_rate_limit(
-        redis, user_id, "tutor_ws", limit=30, window_seconds=3600
+        redis, rl_key, limit=30, window_seconds=3600
     )
     if not allowed:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        await websocket.close(code=4003)  # 4003 = rate limit excedido
         return
 
     await websocket.accept()
@@ -73,7 +84,7 @@ async def tutor_ws(
 
 ### 2. Streaming LLM Token a Token por WebSocket
 
-Cada token del modelo se envía inmediatamente. Al final, se envía `{"type": "done"}`.
+Cada token del modelo se envía inmediatamente. Al final, se envía `{"type": "complete"}`.
 
 ```python
 # services/tutor_streamer.py
@@ -98,13 +109,13 @@ async def stream_tutor_response(
         ):
             token = chunk.get("text", "")
             if token:
-                await websocket.send_json({"type": "token", "data": token})
+                await websocket.send_json({"type": "token", "payload": {"text": token}})
 
         # Señal de fin de stream
-        await websocket.send_json({"type": "done", "session_id": session_id})
+        await websocket.send_json({"type": "complete", "payload": {"session_id": session_id}})
 
     except Exception as exc:
-        await websocket.send_json({"type": "error", "message": str(exc)})
+        await websocket.send_json({"type": "error", "payload": {"message": str(exc)}})
 ```
 
 ### 3. Patrón de Ref en Frontend con Dos useEffects
@@ -118,7 +129,7 @@ Un `useEffect` maneja el ciclo de vida de la conexión. El otro suscribe al stor
 import { useEffect, useRef } from "react";
 import { useTutorStore } from "@/store/tutorStore";
 
-const WS_BASE = import.meta.env.VITE_WS_URL ?? "ws://localhost:8000";
+const WS_BASE = import.meta.env.VITE_WS_URL ?? "ws://localhost:8000"; // dev only — producción DEBE usar wss://
 
 export function useTutorSocket(sessionId: string, token: string) {
   const wsRef = useRef<WebSocket | null>(null);
@@ -138,8 +149,8 @@ export function useTutorSocket(sessionId: string, token: string) {
     ws.onmessage = (event) => {
       const msg = JSON.parse(event.data) as TutorMessage;
       if (msg.type === "token") {
-        appendToken(msg.data);
-      } else if (msg.type === "done") {
+        appendToken(msg.payload.text);
+      } else if (msg.type === "complete") {
         useTutorStore.getState().finalizeMessage();
       }
     };
@@ -156,7 +167,7 @@ export function useTutorSocket(sessionId: string, token: string) {
       (state) => state.pendingMessage,
       (pendingMessage) => {
         if (pendingMessage && wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ content: pendingMessage }));
+          wsRef.current.send(JSON.stringify({ type: "message", payload: { content: pendingMessage } }));
           useTutorStore.getState().clearPendingMessage();
         }
       }
@@ -225,7 +236,7 @@ if payload is None:
 # BIEN — validar primero, aceptar después
 payload = decode_access_token(token)
 if payload is None:
-    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    await websocket.close(code=4001)  # token inválido o expirado
     return
 await websocket.accept()
 ```
@@ -273,19 +284,21 @@ ws.onmessage = (e) => setTokens((prev) => [...prev, e.data]);
 // BIEN — llamar accion del store de Zustand
 ws.onmessage = (e) => {
   const msg = JSON.parse(e.data);
-  useTutorStore.getState().appendToken(msg.data);
+  useTutorStore.getState().appendToken(msg.payload.text);
 };
 ```
 
 ## Checklist
 
-- [ ] El JWT se valida ANTES de `websocket.accept()`, con cierre `1008` si falla
-- [ ] El rate limit (30 msg/hora) se chequea en el handshake, no en cada mensaje
-- [ ] El streaming usa `send_json({"type": "token", "data": token})` por chunk
-- [ ] Al finalizar el stream se envía `{"type": "done", "session_id": session_id}`
-- [ ] Los errores del LLM se capturan y se envían como `{"type": "error", "message": ...}`
+- [ ] El JWT se valida ANTES de `websocket.accept()`, con cierre `4001` si falla (token inválido/expirado)
+- [ ] El rate limit (30 msg/hora por ejercicio) se chequea en cada mensaje enviado por el alumno
+- [ ] El streaming usa `send_json({"type": "token", "payload": {"text": token}})` por chunk
+- [ ] Al finalizar el stream se envía `{"type": "complete", "payload": {"session_id": session_id}}`
+- [ ] Los errores del LLM se capturan y se envían como `{"type": "error", "payload": {"message": ...}}`
 - [ ] El frontend usa dos `useEffect` separados (lifecycle vs store subscription)
 - [ ] El cleanup del `useEffect` cierra el socket con código `1000`
 - [ ] El exponential backoff tiene `MAX_RETRIES=5` y `BASE_DELAY_MS=1000`
 - [ ] Ningún `setState` de React se llama directamente desde `onmessage`
 - [ ] El `wsRef` se usa para enviar mensajes, no se re-crea en cada render
+- [ ] `VITE_WS_URL` usa `wss://` en producción (nunca `ws://` en producción)
+- [ ] El rate limit del tutor usa la key canónica `rl:tutor:{user_id}:{exercise_id}` (incluye exercise_id)

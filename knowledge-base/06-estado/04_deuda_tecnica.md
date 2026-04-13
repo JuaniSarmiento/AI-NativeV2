@@ -114,12 +114,14 @@ Presión de tiempo / complejidad / dependencia externa / etc.
 
 Para ilustrar cómo se usa el formato:
 
+*(Este es un ejemplo hipotético para ilustrar el formato)*
+
 ```markdown
 ### TD-001: Hash chain verification job no tiene retry logic
 
 **Categoría**: Arquitectura
 **Severidad**: Medio
-**Fecha descubierto**: 2026-05-15
+**Fecha descubierto**: 2026-04-01
 **Descubierto por**: @dev3
 **Fase relacionada**: Fase 3
 

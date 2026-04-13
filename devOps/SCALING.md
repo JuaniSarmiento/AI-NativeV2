@@ -109,8 +109,10 @@ A largo plazo, particionar `governance.audit_logs` y `analytics.session_metrics`
 | Propósito | Key pattern | TTL |
 |---|---|---|
 | Caché de contexto del tutor | `tutor:ctx:{session_id}` | 1h |
-| Rate limiting de endpoints | `rate:{user_id}:{endpoint}` | 1min |
-| Bus de eventos WS | Canal Pub/Sub `ws:events` | — |
+| Rate limiting tutor | `rl:tutor:{user_id}:{exercise_id}` | 1h (sliding window) |
+| Rate limiting login | `rl:login:{ip}` | 1min (sliding window) |
+| Event bus entre fases | Redis Streams: `events:submissions`, `events:tutor`, `events:code`, `events:cognitive` | — |
+| Multiplexing WS entre workers | Canal Pub/Sub `ws:events` (solo WS worker, no inter-fase) | — |
 | Blacklist de JWT | `jwt:blacklist:{jti}` | = expiración del token |
 
 ### Escalado de Redis
@@ -164,7 +166,7 @@ Monitorear estas métricas y actuar cuando se superen los umbrales:
 |---|---|---|---|
 | Piloto | ~30 | Docker Compose, 1 host | — (configuración actual) |
 | Expansión | ~150 | Docker Compose, 1 host potente | +workers API, cola de sandbox |
-| Multi-comisión | ~300 | Docker Swarm o K8s básico | Redis Pub/Sub para WS, read replica DB |
+| Multi-comisión | ~300 | Docker Swarm o K8s básico | Redis Pub/Sub para WS worker multiplexing, Redis Streams para event bus, read replica DB |
 | Institucional | 1000+ | K8s + managed DB (RDS) + managed Redis | CDN para frontend, DMS para migraciones |
 
 ---

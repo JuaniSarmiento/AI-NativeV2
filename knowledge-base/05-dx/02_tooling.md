@@ -91,7 +91,8 @@ Configuración de pytest en `backend/pyproject.toml`:
 
 ```toml
 [tool.pytest.ini_options]
-asyncio_mode = "auto"        # todos los tests async corren con asyncio automáticamente
+asyncio_mode = "auto"                          # todos los tests async corren con asyncio automáticamente
+asyncio_default_fixture_loop_scope = "session" # un solo event loop para toda la suite, evita "Event loop is closed"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
@@ -169,7 +170,7 @@ ruff format .
 ruff format . --check
 
 # Revisar un solo archivo
-ruff check app/services/tutor_service.py
+ruff check app/features/tutor_service.py
 ```
 
 Configuración en `backend/pyproject.toml`:
@@ -207,7 +208,7 @@ known-first-party = ["app"]
 mypy app/
 
 # Verificar un módulo específico
-mypy app/services/tutor_service.py
+mypy app/features/tutor_service.py
 
 # Con output detallado
 mypy app/ --show-error-codes --pretty
@@ -488,11 +489,11 @@ WHERE datname = 'ainative';
 -- Ver índices de una tabla
 SELECT indexname, indexdef
 FROM pg_indexes
-WHERE tablename = 'cognitive_trace_records';
+WHERE tablename = 'cognitive_events';
 
 -- Revisar el hash chain (últimos 5 registros)
 SELECT id, created_at, hash, previous_hash
-FROM cognitive.cognitive_trace_records
+FROM cognitive.cognitive_events
 ORDER BY created_at DESC
 LIMIT 5;
 ```
@@ -573,7 +574,7 @@ docker system prune -a            # CUIDADO: borra todo lo que no está en uso
 
 ```bash
 # Instalar
-pip install httpie
+uv tool install httpie
 
 # Login
 http POST localhost:8000/api/v1/auth/login \
@@ -650,7 +651,7 @@ El proyecto usa `pre-commit` para ejecutar linting y formateo automáticamente a
 
 ```bash
 # Instalar pre-commit (ya está en las dependencias dev del backend)
-pip install pre-commit
+uv tool install pre-commit
 
 # Instalar los hooks en el repositorio local
 pre-commit install

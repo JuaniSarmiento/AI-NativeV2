@@ -25,10 +25,10 @@ La plataforma usa **4 schemas** en PostgreSQL para separar responsabilidades y f
 
 | Schema | Propósito | Tablas principales |
 |--------|-----------|-------------------|
-| `users` | Autenticación y perfiles de usuarios | `accounts`, `profiles`, `roles` |
-| `tutor` | Sesiones y mensajes del tutor socrático | `sessions`, `messages`, `prompts` |
-| `ctr` | Continuous Tracking Record (hash chain) | `events`, `chains` |
-| `analytics` | Métricas de aprendizaje y ejercicios | `student_metrics`, `exercise_attempts`, `course_stats` |
+| `operational` | Cursos, ejercicios, usuarios, submissions, interacciones con el tutor | `users`, `courses`, `commissions`, `enrollments`, `exercises`, `submissions`, `tutor_interactions` |
+| `cognitive` | Sesiones cognitivas, CTR events, métricas | `cognitive_sessions`, `cognitive_events`, `cognitive_metrics` |
+| `governance` | Auditoría, versionado de prompts, eventos de política | `governance_events`, `tutor_system_prompts` |
+| `analytics` | Métricas de aprendizaje y ejercicios | `student_metrics`, `exercise_attempts`, `course_stats`, `risk_assessments` |
 
 **Por qué múltiples schemas**:
 - Separación de responsabilidades clara a nivel de DB
@@ -40,27 +40,33 @@ La plataforma usa **4 schemas** en PostgreSQL para separar responsabilidades y f
 
 ```
 ainative (database)
-├── users (schema)
-│   ├── accounts          id, email, password_hash, role, is_active, created_at
-│   └── profiles          user_id (FK), full_name, avatar_url, bio, updated_at
+├── operational (schema)
+│   ├── users             id, email, password_hash (VARCHAR 128), role, is_active, created_at
+│   ├── courses           id, name, description, created_by (FK users), created_at
+│   ├── commissions       id, course_id (FK), name, year, is_active
+│   ├── enrollments       id, student_id (FK users), commission_id (FK), enrolled_at
+│   ├── exercises         id, commission_id (FK), title, description, starter_code, created_by
+│   ├── submissions       id, student_id (FK users), exercise_id (FK), code, status, created_at
+│   └── tutor_interactions    id, session_id (FK cognitive.cognitive_sessions), role (user/assistant),
+│                             content, n4_level, tokens_used, model_version, prompt_hash (SHA-256), created_at
 │
-├── tutor (schema)
-│   ├── sessions          id, user_id, exercise_id, started_at, ended_at, status
-│   ├── messages          id, session_id, role (user/assistant), content, token_count, created_at
-│   └── prompts           id, version_hash (SHA-256), content, created_at, is_active
+├── cognitive (schema)
+│   ├── cognitive_sessions    id, student_id (FK), exercise_id (FK), started_at, ended_at, status
+│   ├── cognitive_events      id, session_id (FK), sequence_num, event_type, payload (JSONB),
+│   │                         previous_hash, event_hash (SHA-256), timestamp, user_id  ← INMUTABLE
+│   └── cognitive_metrics     id, session_id (FK), n1_comprehension_score, n2_strategy_score, n3_validation_score, n4_ai_interaction_score, total_interactions, help_seeking_ratio, autonomy_index, risk_level
 │
-├── ctr (schema)
-│   ├── chains            id, session_id, created_at (una chain por sesión)
-│   └── events            id, chain_id, sequence_num, event_type, payload (JSONB),
-│                         previous_hash, hash (SHA-256), timestamp, user_id
+├── governance (schema)
+│   ├── governance_events     id, event_type, actor_id, description, payload (JSONB), created_at
+│   └── tutor_system_prompts  id, version_hash (SHA-256), content, created_at, is_active
 │
 └── analytics (schema)
-    ├── exercise_attempts  id, user_id, exercise_id, session_id, code_submitted,
+    ├── exercise_attempts  id, user_id (FK), exercise_id (FK), session_id (FK), code_submitted,
     │                      passed, error_type, attempt_num, time_spent_ms, created_at
     ├── student_metrics    user_id (PK), total_sessions, total_messages,
     │                      avg_attempts_per_exercise, last_active, updated_at
-    └── course_stats       course_id (PK), total_students, avg_completion_rate,
-                           updated_at
+    ├── course_stats       course_id (PK), total_students, avg_completion_rate, updated_at
+    └── risk_assessments   id, student_id (FK), session_id (FK), risk_level, indicators, created_at
 ```
 
 ---
@@ -71,7 +77,7 @@ ainative (database)
 
 ```bash
 # En el directorio backend/
-pip install alembic
+uv add alembic
 
 # Inicializar (si no está ya inicializado)
 alembic init alembic
@@ -150,7 +156,7 @@ from alembic import context
 # Importar todos los modelos para que Alembic los detecte
 # CRÍTICO: si no se importan los modelos, autogenerate no los ve
 from app.models.base import Base
-from app.models import users, tutor, ctr, analytics  # noqa: F401
+from app.models import operational, cognitive, governance, analytics  # noqa: F401
 
 config = context.config
 
@@ -165,7 +171,7 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 # Schemas que Alembic debe incluir en autogenerate
-SCHEMAS = ["users", "tutor", "ctr", "analytics"]
+SCHEMAS = ["operational", "cognitive", "governance", "analytics"]
 
 
 def include_object(object, name, type_, reflected, compare_to):
@@ -204,6 +210,7 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         # Crear schemas si no existen (idempotente)
+        # Schemas canónicos: operational, cognitive, governance, analytics
         for schema in SCHEMAS:
             connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
         connection.commit()
@@ -252,13 +259,14 @@ class UserRole(str, Enum):
     ADMIN = "admin"
 
 class UserAccount(Base):
-    __tablename__ = "accounts"
-    __table_args__ = {"schema": "users"}  # ← CRÍTICO: schema explícito
+    __tablename__ = "users"
+    __table_args__ = {"schema": "operational"}  # ← CRÍTICO: schema explícito
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
-    password_hash: Mapped[str] = mapped_column(String(72), nullable=False)
-    role: Mapped[UserRole] = mapped_column(SAEnum(UserRole, schema="users"), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    # VARCHAR(128): bcrypt produce 60 chars. 128 da margen para migración a argon2id (97 chars típico).
+    role: Mapped[UserRole] = mapped_column(SAEnum(UserRole, schema="operational"), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 ```
@@ -282,7 +290,7 @@ class UserAccount(Base):
    alembic upgrade head
    ↓
 5. Verificar en la DB que los cambios son correctos
-   docker compose exec db psql -U postgres ainative -c "\d users.accounts"
+   docker compose exec db psql -U postgres ainative -c "\d operational.users"
 ```
 
 ### 3.2 Cuándo revisar obligatoriamente
@@ -330,11 +338,11 @@ depends_on = None
 
 def upgrade() -> None:
     # ──────────────────────────────────────────
-    # Crear schemas
+    # Crear schemas canónicos
     # ──────────────────────────────────────────
-    op.execute("CREATE SCHEMA IF NOT EXISTS users")
-    op.execute("CREATE SCHEMA IF NOT EXISTS tutor")
-    op.execute("CREATE SCHEMA IF NOT EXISTS ctr")
+    op.execute("CREATE SCHEMA IF NOT EXISTS operational")
+    op.execute("CREATE SCHEMA IF NOT EXISTS cognitive")
+    op.execute("CREATE SCHEMA IF NOT EXISTS governance")
     op.execute("CREATE SCHEMA IF NOT EXISTS analytics")
 
     # ──────────────────────────────────────────
@@ -343,95 +351,125 @@ def upgrade() -> None:
     user_role_enum = postgresql.ENUM(
         "alumno", "docente", "admin",
         name="userrole",
-        schema="users",
+        schema="operational",
     )
     user_role_enum.create(op.get_bind(), checkfirst=True)
 
     message_role_enum = postgresql.ENUM(
-        "user", "assistant", "system",
+        "user", "assistant",
         name="messagerole",
-        schema="tutor",
+        schema="operational",
     )
     message_role_enum.create(op.get_bind(), checkfirst=True)
 
     # ──────────────────────────────────────────
-    # Schema: users
+    # Schema: operational
     # ──────────────────────────────────────────
     op.create_table(
-        "accounts",
+        "users",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("email", sa.String(255), nullable=False),
-        sa.Column("password_hash", sa.String(72), nullable=False),
-        sa.Column("role", sa.Enum("alumno", "docente", "admin", name="userrole", schema="users"), nullable=False),
+        # VARCHAR(128): bcrypt=60chars. Espacio para migración a argon2id (97chars típico).
+        sa.Column("password_hash", sa.String(128), nullable=False),
+        sa.Column("role", sa.Enum("alumno", "docente", "admin", name="userrole", schema="operational"), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default="true"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), onupdate=sa.text("NOW()")),
         sa.UniqueConstraint("email"),
-        schema="users",
+        schema="operational",
     )
-    op.create_index("ix_users_accounts_email", "accounts", ["email"], schema="users")
+    op.create_index("ix_operational_users_email", "users", ["email"], schema="operational")
 
     op.create_table(
-        "profiles",
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.accounts.id", ondelete="CASCADE"), primary_key=True),
-        sa.Column("full_name", sa.String(255), nullable=False),
-        sa.Column("avatar_url", sa.Text(), nullable=True),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()")),
-        schema="users",
-    )
-
-    # ──────────────────────────────────────────
-    # Schema: tutor
-    # ──────────────────────────────────────────
-    op.create_table(
-        "sessions",
+        "courses",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.accounts.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("exercise_id", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column("name", sa.String(255), nullable=False),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("created_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("operational.users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()")),
+        schema="operational",
+    )
+
+    op.create_table(
+        "exercises",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("commission_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("operational.commissions.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("title", sa.String(255), nullable=False),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("starter_code", sa.Text(), nullable=True),
+        sa.Column("created_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("operational.users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()")),
+        schema="operational",
+    )
+
+    # ──────────────────────────────────────────
+    # Schema: cognitive
+    # ──────────────────────────────────────────
+    op.create_table(
+        "cognitive_sessions",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("student_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("operational.users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("exercise_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("operational.exercises.id", ondelete="SET NULL"), nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()")),
         sa.Column("ended_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("status", sa.String(50), nullable=False, server_default="active"),
-        schema="tutor",
+        sa.Column("status", sa.String(50), nullable=False, server_default="open"),  # open/closed/invalidated
+        schema="cognitive",
     )
-    op.create_index("ix_tutor_sessions_user_id", "sessions", ["user_id"], schema="tutor")
+    op.create_index("ix_cognitive_sessions_student_id", "cognitive_sessions", ["student_id"], schema="cognitive")
 
     op.create_table(
-        "messages",
+        "tutor_interactions",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("session_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("tutor.sessions.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("role", sa.Enum("user", "assistant", "system", name="messagerole", schema="tutor"), nullable=False),
+        sa.Column("session_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("cognitive.cognitive_sessions.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("role", sa.Enum("user", "assistant", name="messagerole", schema="operational"), nullable=False),
         sa.Column("content", sa.Text(), nullable=False),
-        sa.Column("token_count", sa.Integer(), nullable=True),
-        sa.Column("prompt_version_hash", sa.String(64), nullable=True),  # SHA-256 del prompt
+        sa.Column("n4_level", sa.SmallInteger(), nullable=True),
+        sa.Column("tokens_used", sa.Integer(), nullable=True),
+        sa.Column("model_version", sa.String(100), nullable=True),
+        sa.Column("prompt_hash", sa.String(64), nullable=False),  # SHA-256 del prompt activo
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()")),
-        schema="tutor",
+        schema="operational",
     )
-    op.create_index("ix_tutor_messages_session_id", "messages", ["session_id"], schema="tutor")
-
-    # ──────────────────────────────────────────
-    # Schema: ctr
-    # ──────────────────────────────────────────
-    op.create_table(
-        "chains",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("session_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("tutor.sessions.id", ondelete="CASCADE"), nullable=False, unique=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()")),
-        schema="ctr",
-    )
+    op.create_index("ix_operational_interactions_session_id", "tutor_interactions", ["session_id"], schema="operational")
 
     op.create_table(
-        "events",
+        "cognitive_events",
+        # TABLA INMUTABLE: solo INSERT, nunca UPDATE/DELETE (hash chain)
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("chain_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("ctr.chains.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("session_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("cognitive.cognitive_sessions.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("sequence_num", sa.Integer(), nullable=False),
         sa.Column("event_type", sa.String(100), nullable=False),
         sa.Column("payload", postgresql.JSONB(), nullable=False, server_default="{}"),
         sa.Column("previous_hash", sa.String(64), nullable=True),   # NULL para el primer evento
-        sa.Column("hash", sa.String(64), nullable=False),
+        sa.Column("event_hash", sa.String(64), nullable=False),
         sa.Column("timestamp", sa.DateTime(timezone=True), server_default=sa.text("NOW()")),
         sa.Column("user_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.UniqueConstraint("chain_id", "sequence_num"),
-        schema="ctr",
+        sa.UniqueConstraint("session_id", "sequence_num"),
+        schema="cognitive",
+    )
+
+    # ──────────────────────────────────────────
+    # Schema: governance
+    # ──────────────────────────────────────────
+    op.create_table(
+        "tutor_system_prompts",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("version_hash", sa.String(64), nullable=False, unique=True),  # SHA-256 del contenido
+        sa.Column("content", sa.Text(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()")),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default="false"),
+        schema="governance",
+    )
+
+    op.create_table(
+        "governance_events",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("event_type", sa.String(100), nullable=False),
+        sa.Column("actor_id", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("payload", postgresql.JSONB(), nullable=False, server_default="{}"),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()")),
+        schema="governance",
     )
 
     # ──────────────────────────────────────────
@@ -440,9 +478,9 @@ def upgrade() -> None:
     op.create_table(
         "exercise_attempts",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.accounts.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("operational.users.id", ondelete="CASCADE"), nullable=False),
         sa.Column("exercise_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("session_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("tutor.sessions.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("session_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("cognitive.cognitive_sessions.id", ondelete="SET NULL"), nullable=True),
         sa.Column("code_submitted", sa.Text(), nullable=True),
         sa.Column("passed", sa.Boolean(), nullable=False),
         sa.Column("error_type", sa.String(100), nullable=True),
@@ -453,26 +491,50 @@ def upgrade() -> None:
     )
     op.create_index("ix_analytics_attempts_user_exercise", "exercise_attempts", ["user_id", "exercise_id"], schema="analytics")
 
+    op.create_table(
+        "student_metrics",
+        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("operational.users.id", ondelete="CASCADE"), primary_key=True),
+        sa.Column("total_sessions", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("total_messages", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("avg_attempts_per_exercise", sa.Float(), nullable=True),
+        sa.Column("last_active", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()")),
+        schema="analytics",
+    )
+
+    op.create_table(
+        "course_stats",
+        sa.Column("course_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("operational.courses.id", ondelete="CASCADE"), primary_key=True),
+        sa.Column("total_students", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("avg_completion_rate", sa.Float(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()")),
+        schema="analytics",
+    )
+
 
 def downgrade() -> None:
     # Eliminar en orden inverso (FK constraints)
+    op.drop_table("course_stats", schema="analytics")
+    op.drop_table("student_metrics", schema="analytics")
     op.drop_table("exercise_attempts", schema="analytics")
-    op.drop_table("events", schema="ctr")
-    op.drop_table("chains", schema="ctr")
-    op.drop_table("messages", schema="tutor")
-    op.drop_table("sessions", schema="tutor")
-    op.drop_table("profiles", schema="users")
-    op.drop_table("accounts", schema="users")
+    op.drop_table("governance_events", schema="governance")
+    op.drop_table("tutor_system_prompts", schema="governance")
+    op.drop_table("cognitive_events", schema="cognitive")
+    op.drop_table("tutor_interactions", schema="operational")
+    op.drop_table("cognitive_sessions", schema="cognitive")
+    op.drop_table("exercises", schema="operational")
+    op.drop_table("courses", schema="operational")
+    op.drop_table("users", schema="operational")
 
     # Eliminar ENUMs
-    op.execute("DROP TYPE IF EXISTS tutor.messagerole")
-    op.execute("DROP TYPE IF EXISTS users.userrole")
+    op.execute("DROP TYPE IF EXISTS operational.messagerole")
+    op.execute("DROP TYPE IF EXISTS operational.userrole")
 
     # Eliminar schemas
-    op.execute("DROP SCHEMA IF EXISTS analytics")
-    op.execute("DROP SCHEMA IF EXISTS ctr")
-    op.execute("DROP SCHEMA IF EXISTS tutor")
-    op.execute("DROP SCHEMA IF EXISTS users")
+    op.execute("DROP SCHEMA IF EXISTS analytics CASCADE")
+    op.execute("DROP SCHEMA IF EXISTS governance CASCADE")
+    op.execute("DROP SCHEMA IF EXISTS cognitive CASCADE")
+    op.execute("DROP SCHEMA IF EXISTS operational CASCADE")
 ```
 
 ---
@@ -536,8 +598,8 @@ async def seed():
             # INSERT ... ON CONFLICT DO NOTHING → idempotente
             await session.execute(
                 text("""
-                    INSERT INTO users.accounts (id, email, password_hash, role)
-                    VALUES (:id, :email, :password_hash, :role::users.userrole)
+                    INSERT INTO operational.users (id, email, password_hash, role)
+                    VALUES (:id, :email, :password_hash, :role::operational.userrole)
                     ON CONFLICT (id) DO NOTHING
                 """),
                 {
@@ -546,15 +608,6 @@ async def seed():
                     "password_hash": password_hash,
                     "role": user_data["role"],
                 }
-            )
-
-            await session.execute(
-                text("""
-                    INSERT INTO users.profiles (user_id, full_name)
-                    VALUES (:user_id, :full_name)
-                    ON CONFLICT (user_id) DO NOTHING
-                """),
-                {"user_id": user_data["id"], "full_name": user_data["full_name"]}
             )
 
         await session.commit()
@@ -590,9 +643,9 @@ Alembic genera IDs aleatorios (hash corto). Renombrarlos opcionalmente con núme
 |--------|-----------|---------|
 | Tablas | `snake_case`, plural | `exercise_attempts` |
 | Columnas | `snake_case` | `password_hash` |
-| Índices | `ix_{schema}_{tabla}_{columnas}` | `ix_users_accounts_email` |
+| Índices | `ix_{schema}_{tabla}_{columnas}` | `ix_operational_users_email` |
 | FKs | `fk_{tabla}_{columna}_{ref_tabla}` | `fk_sessions_user_id_accounts` |
-| ENUMs | `{nombre}` en el schema correspondiente | `userrole` en `users` |
+| ENUMs | `{nombre}` en el schema correspondiente | `userrole` en `operational` |
 | Constraints unique | `uq_{tabla}_{columnas}` | `uq_accounts_email` |
 
 ---
@@ -602,11 +655,11 @@ Alembic genera IDs aleatorios (hash corto). Renombrarlos opcionalmente con núme
 ### P1: Falta el prefijo de schema en ForeignKey
 
 ```python
-# INCORRECTO — Alembic no sabe en qué schema buscar "accounts"
-sa.ForeignKey("accounts.id")
+# INCORRECTO — Alembic no sabe en qué schema buscar "users"
+sa.ForeignKey("users.id")
 
 # CORRECTO — siempre incluir schema.tabla
-sa.ForeignKey("users.accounts.id")
+sa.ForeignKey("operational.users.id")
 ```
 
 ### P2: JSONB con default mutable
@@ -627,7 +680,7 @@ Cuando se **agrega** un valor a un ENUM existente:
 
 # En su lugar, usar ALTER TYPE ADD VALUE (no requiere drop):
 def upgrade():
-    op.execute("ALTER TYPE users.userrole ADD VALUE IF NOT EXISTS 'superadmin'")
+    op.execute("ALTER TYPE operational.userrole ADD VALUE IF NOT EXISTS 'superadmin'")
 
 def downgrade():
     # No se puede remover un valor de enum en PostgreSQL sin recrearlo
@@ -639,30 +692,30 @@ def downgrade():
 
 ```python
 # Si la tabla ya tiene filas, esto fallará:
-op.add_column("accounts", sa.Column("phone", sa.String(20), nullable=False), schema="users")
+op.add_column("users", sa.Column("phone", sa.String(20), nullable=False), schema="operational")
 
 # Correcto: agregar como nullable primero, luego hacer NOT NULL con ALTER
 def upgrade():
     # 1. Agregar nullable
-    op.add_column("accounts", sa.Column("phone", sa.String(20), nullable=True), schema="users")
+    op.add_column("users", sa.Column("phone", sa.String(20), nullable=True), schema="operational")
     # 2. Poblar datos existentes
-    op.execute("UPDATE users.accounts SET phone = '' WHERE phone IS NULL")
+    op.execute("UPDATE operational.users SET phone = '' WHERE phone IS NULL")
     # 3. Hacer NOT NULL
-    op.alter_column("accounts", "phone", nullable=False, schema="users")
+    op.alter_column("users", "phone", nullable=False, schema="operational")
 ```
 
 ### P5: Índices en tablas grandes (producción)
 
 ```python
 # Bloquea la tabla durante la creación — NO usar en producción con datos
-op.create_index("ix_ctr_events_user_id", "events", ["user_id"], schema="ctr")
+op.create_index("ix_cognitive_events_user_id", "cognitive_events", ["user_id"], schema="cognitive")
 
 # En producción usar CONCURRENTLY (no bloquea la tabla):
 def upgrade():
-    op.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_ctr_events_user_id ON ctr.events (user_id)")
+    op.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_cognitive_events_user_id ON cognitive.cognitive_events (user_id)")
 
 def downgrade():
-    op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_ctr_events_user_id")
+    op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_cognitive_events_user_id")
 ```
 
 ### P6: Olvidar revisar el SQL generado

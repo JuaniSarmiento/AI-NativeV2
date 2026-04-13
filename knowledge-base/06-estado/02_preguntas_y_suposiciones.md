@@ -84,8 +84,8 @@ Las suposiciones son decisiones implícitas tomadas durante el diseño. Si algun
 ### SUP-006: Rate limiting conservador por defecto
 
 **Suposición**: Los valores de rate limiting son:
-- Intentos de login: máximo 5 fallidos por IP en 15 minutos
-- Mensajes al tutor: máximo 30 mensajes por sesión
+- Intentos de login: máximo 10 intentos por IP en 5 minutos (clave `rl:login:{ip}`)
+- Mensajes al tutor: máximo 30 mensajes/hora por alumno por ejercicio
 - Sesiones de tutor: máximo 5 sesiones activas simultáneas por usuario
 - Tokens de Anthropic por mensaje: máximo 4096 tokens de output
 
@@ -198,10 +198,10 @@ Valores configurados sin evidencia definitiva, sujetos a revisión:
 
 | Parámetro | Valor actual | Razón del default | Dónde revisar |
 |---|---|---|---|
-| `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | 30 min | Estándar de la industria | Post-piloto: ¿usuarios se quejan de re-login frecuente? |
+| `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | 15 min | Seguridad conservadora para tokens de acceso | Post-piloto: ¿usuarios se quejan de re-login frecuente? |
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | 7 días | Balance seguridad/comodidad | Política de seguridad de la institución |
-| `TUTOR_MAX_MESSAGES_PER_SESSION` | 30 mensajes | Estimación de sesión razonable | Datos reales del piloto |
-| `SANDBOX_TIMEOUT_SECONDS` | 5 seg | Previene loops infinitos | Si ejercicios legítimos necesitan más tiempo |
+| `TUTOR_RATE_LIMIT_PER_HOUR` | 30 mensajes/hora por alumno por ejercicio | Estimación de sesión razonable | Datos reales del piloto |
+| `SANDBOX_TIMEOUT_SECONDS` | 10 seg | Balance entre prevenir loops y permitir ejercicios legítimos | Si ejercicios legítimos necesitan más tiempo |
 | `SANDBOX_MEMORY_LIMIT_MB` | 128 MB | Previene consumo excesivo | Ajustar si hay ejercicios con datasets |
 | `DEFAULT_PAGE_SIZE` | 20 | Estándar de paginación | UX del piloto |
 | `MAX_PAGE_SIZE` | 100 | Previene requests de carga pesada | Monitoreo de performance |

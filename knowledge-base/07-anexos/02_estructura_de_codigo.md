@@ -12,10 +12,12 @@ ai-native-platform/
 ├── backend/           # FastAPI + SQLAlchemy 2.0 async
 ├── frontend/          # React 19 + Vite + Zustand 5 + TailwindCSS 4
 ├── shared/            # Contratos compartidos backend-frontend
-├── infra/             # Configuración de infraestructura (Kubernetes, Terraform)
+├── infra/             # Docker Compose, scripts, seed data
 ├── devOps/            # Dockerfiles, scripts de CI/CD
 ├── knowledge-base/    # Documentación del proyecto (este directorio)
+├── openspec/          # SDD: changes, specs (workflow OPSX)
 ├── scripts/           # Scripts utilitarios (seed, validate, migrate)
+├── scaffold-decisions.yaml         # Fuente de verdad del scaffold
 ├── docker-compose.yml              # Servicios de infraestructura local
 ├── docker-compose.override.yml     # Overrides para desarrollo
 ├── .env.example                    # Template de variables de entorno
@@ -38,79 +40,62 @@ backend/
 ├── app/
 │   ├── __init__.py
 │   ├── main.py                     # FastAPI app factory, registro de routers y middleware
+│   ├── config.py                   # Pydantic Settings, carga de variables de entorno
+│   ├── dependencies.py             # Shared Depends() factories
 │   ├── core/
 │   │   ├── __init__.py
-│   │   ├── config.py               # Pydantic Settings, carga de variables de entorno
 │   │   ├── security.py             # JWT encode/decode, password hashing
-│   │   ├── hash_chain.py           # Algoritmo de hash chain para CTRs
-│   │   ├── error_codes.py          # Constantes de códigos de error (UPPERCASE_SNAKE)
+│   │   ├── hash_chain.py           # Algoritmo de hash chain para CTRs (100% coverage)
 │   │   ├── exceptions.py           # Excepciones de dominio (ExerciseNotFoundError, etc.)
 │   │   └── logging.py              # Configuración de structlog
-│   ├── db/
-│   │   ├── __init__.py
-│   │   ├── base.py                 # DeclarativeBase de SQLAlchemy, imports de todos los modelos
-│   │   ├── session.py              # Engine, async_sessionmaker, dependency get_db
-│   │   └── uow.py                  # Unit of Work pattern
-│   ├── dependencies/
-│   │   ├── __init__.py
-│   │   ├── auth.py                 # get_current_user, require_role, oauth2_scheme
-│   │   ├── pagination.py           # Parámetros de paginación comunes
-│   │   └── services.py             # Factories de servicios como Depends
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── user_model.py           # User, UserRole enum — schema: operational
-│   │   ├── exercise_model.py       # Exercise, TestCase — schema: operational
-│   │   ├── session_model.py        # TutorSession — schema: operational
-│   │   ├── ctr_model.py            # CognitiveTraceRecord — schema: cognitive
-│   │   ├── governance_model.py     # ScoringRubric, Alert — schema: governance
-│   │   └── analytics_model.py     # AggregatedMetric — schema: analytics
-│   ├── schemas/
-│   │   ├── __init__.py
-│   │   ├── common.py               # SuccessResponse[T], ErrorResponse, PaginatedResponse[T]
-│   │   ├── auth_schemas.py         # LoginRequest, TokenResponse, RefreshRequest
-│   │   ├── user_schemas.py         # UserBase, UserResponse, UpdateUserRequest
-│   │   ├── exercise_schemas.py     # ExerciseBase, CreateExerciseRequest, ExerciseResponse
-│   │   ├── session_schemas.py      # CreateSessionRequest, SessionResponse
-│   │   ├── tutor_schemas.py        # TutorMessageRequest, TutorMessageResponse
-│   │   └── ctr_schemas.py          # CTRResponse, CTRListResponse
-│   ├── repositories/
-│   │   ├── __init__.py
-│   │   ├── base_repository.py      # BaseRepository[T] con operaciones CRUD genéricas
-│   │   ├── user_repository.py      # UserRepository: find_by_email, find_all_active
-│   │   ├── exercise_repository.py  # ExerciseRepository: find_by_difficulty, find_by_topic
-│   │   ├── session_repository.py   # SessionRepository: find_active_for_user
-│   │   └── ctr_repository.py       # CTRRepository: find_by_session, find_last_in_chain
-│   ├── services/
-│   │   ├── __init__.py
-│   │   ├── auth_service.py         # Login, logout, refresh, token management
-│   │   ├── user_service.py         # Perfil, settings de usuario
-│   │   ├── exercise_service.py     # CRUD de ejercicios, validaciones de negocio
-│   │   ├── sandbox_service.py      # Ejecución de código Python en subprocess seguro
-│   │   ├── evaluation_service.py   # Evaluación de código contra test cases
-│   │   ├── tutor_service.py        # Sesiones de tutor, integración con Anthropic, guardrails
-│   │   ├── ctr_service.py          # Creación y consulta de CTRs, gestión del hash chain
-│   │   └── scoring_service.py      # Cálculo de niveles N1-N4, Qe, métricas cognitivas
-│   ├── routers/
-│   │   ├── __init__.py
-│   │   ├── auth_router.py          # /api/v1/auth/*
-│   │   ├── user_router.py          # /api/v1/users/*
-│   │   ├── exercise_router.py      # /api/v1/exercises/*
-│   │   ├── session_router.py       # /api/v1/exercises/{id}/sessions/*
-│   │   ├── tutor_router.py         # WebSocket /ws/tutor/{session_id}
-│   │   ├── ctr_router.py           # /api/v1/sessions/{id}/ctr/*
-│   │   └── analytics_router.py     # /api/v1/analytics/*
-│   ├── middleware/
-│   │   ├── __init__.py
-│   │   ├── cors.py                 # Configuración CORS
-│   │   ├── logging.py              # Request/response logging middleware
-│   │   └── error_handler.py        # Global exception handler → ErrorResponse
-│   └── integrations/
-│       ├── __init__.py
-│       └── anthropic/
-│           ├── __init__.py
-│           ├── client.py           # Cliente de Anthropic API (streaming)
-│           ├── prompt_builder.py   # Construcción de prompts socrátivos
-│           └── guardrails.py       # Pre/post processing para anti-solver
+│   ├── features/
+│   │   ├── auth/                   # Fase 0 — Login, registro, JWT, RBAC
+│   │   │   ├── router.py           # /api/v1/auth/*
+│   │   │   ├── service.py          # Login, logout, refresh, token management
+│   │   │   ├── repository.py
+│   │   │   ├── models.py           # User, UserRole — schema: operational
+│   │   │   └── schemas.py          # LoginRequest, TokenResponse, RefreshRequest
+│   │   ├── courses/                # Fase 1 — CRUD cursos, comisiones, enrollments
+│   │   │   └── ...
+│   │   ├── exercises/              # Fase 1 — CRUD ejercicios, submissions
+│   │   │   ├── router.py           # /api/v1/exercises/*
+│   │   │   ├── service.py
+│   │   │   ├── repository.py
+│   │   │   ├── models.py           # Exercise, TestCase — schema: operational
+│   │   │   └── schemas.py
+│   │   ├── sandbox/                # Fase 1 — Ejecución segura de código
+│   │   │   ├── service.py          # subprocess con timeout 10s, 128MB RAM, sin red
+│   │   │   └── schemas.py
+│   │   ├── tutor/                  # Fase 2 — Orchestrator, guardrails, chat WS
+│   │   │   ├── router.py           # WebSocket /ws/tutor/{session_id}
+│   │   │   ├── service.py          # Sesiones de tutor, integración con Anthropic
+│   │   │   ├── guardrails.py       # Pre/post processing para anti-solver
+│   │   │   ├── prompt_builder.py   # Construcción de prompts socrátivos
+│   │   │   └── schemas.py
+│   │   ├── cognitive/              # Fase 3 — Event classifier, CTR builder, metrics
+│   │   │   ├── router.py           # /api/v1/sessions/{id}/ctr/*
+│   │   │   ├── service.py          # Creación y consulta de CTRs, hash chain
+│   │   │   ├── repository.py       # Solo create + read (no update, no delete)
+│   │   │   ├── models.py           # CognitiveEvent — schema: cognitive (sin is_active)
+│   │   │   └── schemas.py
+│   │   ├── evaluation/             # Fase 3 — Evaluation engine, risk worker
+│   │   │   ├── service.py          # Scoring N1-N4, Qe, métricas cognitivas
+│   │   │   └── schemas.py
+│   │   └── governance/             # Fase 3 — Audit, versioning, coherence
+│   │       ├── router.py           # /api/v1/analytics/*
+│   │       ├── service.py
+│   │       ├── models.py           # GovernanceEvent — schema: governance (sin is_active)
+│   │       └── schemas.py
+│   └── shared/
+│       ├── db/
+│       │   ├── base.py             # DeclarativeBase, imports de todos los modelos
+│       │   ├── session.py          # Engine, async_sessionmaker, get_db dependency
+│       │   └── unit_of_work.py     # UoW pattern
+│       ├── models/                 # Modelos SQLAlchemy compartidos (si aplica)
+│       ├── repositories/
+│       │   └── base_repository.py  # BaseRepository[T] con operaciones CRUD genéricas
+│       └── schemas/
+│           └── common.py           # SuccessResponse[T], ErrorResponse, PaginatedResponse[T]
 ├── alembic/
 │   ├── env.py                      # Contexto de migración multi-schema
 │   ├── script.py.mako              # Template para nuevas migraciones
@@ -149,10 +134,10 @@ backend/
 El punto de entrada de la aplicación FastAPI. Crea la instancia de `FastAPI`, registra todos los routers con sus prefijos (`/api/v1/auth`, `/api/v1/exercises`, etc.), agrega middleware (CORS, logging, error handler), y configura el evento de startup (conectar a Redis, verificar DB).
 
 **`app/core/config.py`**
-Define `Settings(BaseSettings)` que carga todas las variables de entorno usando Pydantic Settings. Incluye validadores para valores críticos (JWT_SECRET_KEY no puede ser "CHANGE_ME" en producción). Se instancia como un singleton `settings = Settings()`.
+Define `Settings(BaseSettings)` que carga todas las variables de entorno usando Pydantic Settings. Incluye validadores para valores críticos (SECRET_KEY no puede ser "CHANGE_ME" en producción). Se instancia como un singleton `settings = Settings()`.
 
 **`app/core/hash_chain.py`**
-Implementa `compute_ctr_hash(content: dict, previous_hash: str | None) -> str` y `verify_chain_integrity(records: list[CognitiveTraceRecord]) -> bool`. La serialización usa `json.dumps(sort_keys=True)` para determinismo garantizado.
+Implementa `compute_ctr_hash(content: dict, previous_hash: str | None) -> str` y `verify_chain_integrity(records: list[CognitiveEvent]) -> bool`. La serialización usa `json.dumps(sort_keys=True)` para determinismo garantizado.
 
 **`app/db/session.py`**
 Crea el `async_engine` usando `create_async_engine` con `asyncpg` como driver. Define `AsyncSessionFactory = async_sessionmaker(engine, expire_on_commit=False)`. Expone `get_db()` como FastAPI dependency que yield una sesión y la cierra al finalizar el request.
@@ -188,56 +173,56 @@ frontend/
 │   │   │   ├── api/
 │   │   │   │   └── authApi.ts          # login(), logout(), refreshToken()
 │   │   │   └── types.ts               # AuthUser, LoginRequest, TokenPair
-│   │   ├── exercises/
+│   │   ├── student/
+│   │   │   ├── components/
+│   │   │   │   ├── StudentDashboard.tsx # Dashboard del alumno: progreso N1-N4
+│   │   │   │   └── ReflectionForm.tsx  # Formulario de reflexión post-sesión
+│   │   │   ├── hooks/
+│   │   │   │   └── useStudentProgress.ts
+│   │   │   ├── stores/
+│   │   │   │   └── studentStore.ts
+│   │   │   ├── api/
+│   │   │   │   └── studentApi.ts
+│   │   │   └── types.ts
+│   │   ├── teacher/
+│   │   │   ├── components/
+│   │   │   │   ├── TeacherDashboard.tsx  # Dashboard docente: vista de comisión
+│   │   │   │   ├── CognitiveTimeline.tsx # Timeline de eventos cognitivos
+│   │   │   │   ├── CTRDetail.tsx         # Detalle de un CTR específico
+│   │   │   │   └── AIUsageIndicator.tsx  # Badge de tipo de uso (crítico/dependiente)
+│   │   │   ├── hooks/
+│   │   │   │   └── useTeacherReports.ts
+│   │   │   ├── stores/
+│   │   │   │   └── teacherStore.ts
+│   │   │   ├── api/
+│   │   │   │   └── teacherApi.ts
+│   │   │   └── types.ts
+│   │   ├── exercise/
 │   │   │   ├── components/
 │   │   │   │   ├── ExerciseList.tsx    # Lista paginada con filtros
 │   │   │   │   ├── ExerciseCard.tsx    # Card individual de ejercicio
 │   │   │   │   ├── ExerciseDetail.tsx  # Vista detalle de un ejercicio
 │   │   │   │   ├── DifficultyFilter.tsx # Selector de nivel de dificultad
-│   │   │   │   ├── CodeEditor.tsx      # Editor de código (Monaco/CodeMirror)
+│   │   │   │   ├── CodeEditor.tsx      # Editor de código (Monaco)
+│   │   │   │   ├── TutorChat.tsx       # Chat socrático con streaming
 │   │   │   │   └── TestResults.tsx     # Resultado de evaluación de casos de test
 │   │   │   ├── hooks/
 │   │   │   │   ├── useExercises.ts     # Fetch + update del store al cargar ejercicios
-│   │   │   │   └── useExerciseDetail.ts
-│   │   │   ├── stores/
-│   │   │   │   └── exerciseStore.ts    # exercises, filters, isLoading, error
-│   │   │   ├── api/
-│   │   │   │   └── exerciseApi.ts      # fetchExercises(), getExercise(), submitCode()
-│   │   │   └── types.ts               # Exercise, ExerciseFilters, SubmissionResult
-│   │   ├── tutor/
-│   │   │   ├── components/
-│   │   │   │   ├── TutorChat.tsx       # Chat completo con historial y streaming
-│   │   │   │   ├── TutorMessage.tsx    # Burbuja individual de mensaje
-│   │   │   │   ├── TutorInput.tsx      # Input con send button y indicadores
-│   │   │   │   └── TypingIndicator.tsx # "El tutor está escribiendo..."
-│   │   │   ├── hooks/
+│   │   │   │   ├── useExerciseDetail.ts
 │   │   │   │   └── useTutorSession.ts  # Gestión del WebSocket, envío de mensajes
 │   │   │   ├── stores/
+│   │   │   │   ├── exerciseStore.ts    # exercises, filters, isLoading, error
 │   │   │   │   └── tutorStore.ts       # messages, sessionId, wsStatus
 │   │   │   ├── websocket/
 │   │   │   │   └── tutorWebSocket.ts   # Clase TutorWebSocket con reconexión
-│   │   │   └── types.ts               # TutorMessage, TutorSession, WSStatus
-│   │   ├── traceability/
-│   │   │   ├── components/
-│   │   │   │   ├── CognitivTimeline.tsx # Timeline de eventos cognitivos
-│   │   │   │   ├── CTRDetail.tsx        # Detalle de un CTR específico
-│   │   │   │   └── AIUsageIndicator.tsx # Badge de tipo de uso (crítico/dependiente)
-│   │   │   ├── stores/
-│   │   │   │   └── traceabilityStore.ts
 │   │   │   ├── api/
-│   │   │   │   └── ctrApi.ts
-│   │   │   └── types.ts
-│   │   └── analytics/
+│   │   │   │   └── exerciseApi.ts      # fetchExercises(), getExercise(), submitCode()
+│   │   │   └── types.ts               # Exercise, ExerciseFilters, TutorMessage, SubmissionResult
+│   │   └── shared/
 │   │       ├── components/
-│   │       │   ├── StudentDashboard.tsx # Dashboard del alumno
-│   │       │   ├── ProfessorDashboard.tsx # Dashboard del profesor
-│   │       │   ├── CognitiveLevelChart.tsx # Gráfico N1-N4
-│   │       │   └── ActivityHeatmap.tsx
-│   │       ├── stores/
-│   │       │   └── analyticsStore.ts
-│   │       ├── api/
-│   │       │   └── analyticsApi.ts
-│   │       └── types.ts
+│   │       │   ├── ErrorBoundary.tsx   # Error boundary a nivel feature
+│   │       │   └── LoadingState.tsx
+│   │       └── types.ts               # Tipos compartidos entre features
 │   ├── shared/
 │   │   ├── components/
 │   │   │   ├── ui/
@@ -294,7 +279,7 @@ Instancia de Axios configurada con:
 - Interceptor de response: en error 401, intenta refresh del token; si falla, logout
 - Interceptor de response: convierte snake_case a camelCase automáticamente (axios-case-converter)
 
-**`src/features/tutor/websocket/tutorWebSocket.ts`**
+**`src/features/exercise/websocket/tutorWebSocket.ts`**
 Clase que encapsula la conexión WebSocket con el tutor. Maneja:
 - Conexión con token en query param
 - Reconexión con backoff exponencial (máximo 5 intentos)
@@ -302,7 +287,7 @@ Clase que encapsula la conexión WebSocket con el tutor. Maneja:
 - Emisión de eventos al store de Zustand
 
 **`src/app/router.tsx`**
-Define las rutas usando React Router v6. Todas las rutas están envueltas en `ProtectedRoute` excepto `/login`. Usa `lazy()` para code splitting de cada feature.
+Define las rutas usando React Router v7. Todas las rutas están envueltas en `ProtectedRoute` excepto `/login`. Usa `lazy()` para code splitting de cada feature.
 
 ---
 
@@ -327,22 +312,17 @@ shared/
 
 ```
 infra/
-├── kubernetes/          # Manifests de Kubernetes (para escala futura)
-│   ├── backend/
-│   │   ├── deployment.yaml
-│   │   ├── service.yaml
-│   │   └── hpa.yaml       # Horizontal Pod Autoscaler
-│   ├── frontend/
-│   │   └── ...
-│   └── postgres/
-│       └── ...
-├── terraform/           # Infraestructura como código (para deploy en cloud futuro)
-│   └── ...
-└── nginx/               # Configuración de nginx como reverse proxy
-    └── nginx.conf       # Proxy a backend:8000 y frontend:5173, WebSocket upgrade
+├── docker-compose.yml       # Servicios de infraestructura local (postgres, redis, pgadmin)
+├── docker-compose.prod.yml  # Overrides para producción
+├── nginx/                   # Configuración de nginx como reverse proxy
+│   └── nginx.conf           # Proxy a backend:8000 y frontend:5173, WebSocket upgrade
+├── scripts/
+│   ├── deploy.sh            # Script de deploy al servidor de UTN FRM
+│   ├── backup_db.sh         # Backup de PostgreSQL
+│   └── health_check.sh      # Verificación de salud post-deploy
+└── seed/
+    └── seed_data.py         # Datos iniciales de prueba
 ```
-
-**Estado actual**: Solo `nginx/nginx.conf` está activo. El resto es preparación para escala futura.
 
 El `nginx.conf` es crítico para el deploy en el servidor institucional: maneja el routing entre el frontend estático y el backend, y la configuración de WebSocket upgrade para el tutor.
 

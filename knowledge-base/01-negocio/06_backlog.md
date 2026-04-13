@@ -68,9 +68,9 @@
 | 38 | Calidad epistémica (Qe) | P1 | #37 | Constructo jerárquico: 4 componentes |
 | 39 | Dependency score | P1 | #37 | Ratio de interacciones "dependent" |
 | 40 | Evaluation Engine | P1 | #37, #38 | E = f(N1, N2, N3, N4, Qe) |
-| 41 | Modelos: risk_assessments | P2 | #31 | Modelo + migración |
-| 42 | Risk Worker | P2 | #37, #41 | Dependency, disengagement, stagnation |
-| 43 | Dashboard endpoints (agregados) | P2 | #37, #42 | GET /dashboard con promedios y riesgo |
+| 41 | Modelos: risk_assessments | P1 | #31 | Modelo + migración |
+| 42 | Risk Worker | P1 | #37, #41 | Dependency, disengagement, stagnation — dependencia bloqueante para dashboard docente (#56) |
+| 43 | Dashboard endpoints (agregados) | P1 | #37, #42 | GET /dashboard con promedios y riesgo |
 | 44 | Endpoint traza cognitiva | P2 | #34 | Timeline de eventos + código + chat |
 | 45 | Validación de integridad CTR | P2 | #34 | Endpoint de auditoría hash chain |
 
@@ -114,7 +114,7 @@
 | Prioridad | Total items | % del backlog |
 |-----------|------------|---------------|
 | P0 — Critical | 28 | 40% |
-| P1 — High | 26 | 37% |
-| P2 — Medium | 13 | 19% |
+| P1 — High | 29 | 41% |
+| P2 — Medium | 10 | 14% |
 | P3 — Low | 3 | 4% |
 | **Total** | **70** | **100%** |

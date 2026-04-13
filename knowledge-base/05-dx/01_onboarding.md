@@ -33,6 +33,8 @@ Antes de clonar el repositorio, asegurate de tener instaladas las siguientes her
 | Docker | 24+ | `docker --version` |
 | Docker Compose | 2.20+ (plugin v2) | `docker compose version` |
 | Git | 2.40+ | `git --version` |
+| `openspec` CLI | última | `openspec --version` |
+| `pre-commit` | 3.0+ | `pre-commit --version` |
 
 > Nota: en Linux, el comando es `docker compose` (plugin v2), no `docker-compose` (v1 legacy). Si tu sistema tiene la versión v1, actualizá o instalá el plugin.
 
@@ -96,9 +98,11 @@ ai-native-platform/
 ├── backend/          # FastAPI application
 ├── frontend/         # React 19 + Vite application
 ├── shared/           # Contratos compartidos (tipos, constantes)
-├── infra/            # Kubernetes / Terraform configs
+├── infra/            # Docker Compose, scripts, seed data
+├── openspec/         # SDD: changes, specs (workflow OPSX)
 ├── devOps/           # CI/CD pipelines, Dockerfiles
 ├── knowledge-base/   # Esta documentación
+├── scaffold-decisions.yaml       # Fuente de verdad del scaffold
 ├── docker-compose.yml
 ├── docker-compose.override.yml  # Solo existe en dev
 ├── .env.example
@@ -127,7 +131,7 @@ REDIS_HOST=localhost
 REDIS_PORT=6379
 
 # === JWT ===
-JWT_SECRET_KEY=CHANGE_ME             # Generar con: openssl rand -hex 32
+SECRET_KEY=CHANGE_ME                 # Generar con: openssl rand -hex 32
 JWT_ALGORITHM=HS256
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES=15
 JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
@@ -154,7 +158,7 @@ Generar una clave JWT segura para desarrollo:
 
 ```bash
 openssl rand -hex 32
-# Pegar el output en JWT_SECRET_KEY
+# Pegar el output en SECRET_KEY
 ```
 
 ---
@@ -225,10 +229,10 @@ source .venv/bin/activate
 which python  # debe apuntar a backend/.venv/bin/python
 
 # Instalar dependencias (incluyendo dev)
-pip install -e ".[dev]"
+uv sync --frozen
 ```
 
-> El proyecto usa `pyproject.toml` con dependencias opcionales `[dev]` para herramientas de testing y linting. `pip install -e ".[dev]"` instala todo.
+> El proyecto usa `pyproject.toml` con dependencias opcionales `[dev]` para herramientas de testing y linting. `uv sync --frozen` instala todo desde el lockfile.
 
 ### Ejecutar migraciones de Alembic
 
@@ -251,7 +255,7 @@ alembic history --verbose
 Output esperado de `alembic current`:
 
 ```
-INFO  [alembic.runtime.migration] Running on postgresql+asyncpg://...
+INFO  [alembic.runtime.migration] Running on postgresql+psycopg2://...
 <revision_id> (head)
 ```
 
@@ -325,11 +329,13 @@ Vite levanta el servidor en `http://localhost:5173`. Tiene hot-reload automátic
 El frontend usa variables con prefijo `VITE_` en un archivo `.env` dentro de `frontend/`:
 
 ```bash
-# frontend/.env (ya debería existir, se copia desde el .env raíz automáticamente)
+# frontend/.env (crearlo manualmente si no existe — ver sección 8)
 VITE_API_BASE_URL=http://localhost:8000
 VITE_WS_BASE_URL=ws://localhost:8000
 VITE_APP_ENV=development
 ```
+
+> El archivo `frontend/.env` NO se crea automáticamente. Si no existe, crearlo manualmente con los valores anteriores (ver sección 8 — "Error: VITE_API_BASE_URL is not defined").
 
 > Las variables `VITE_*` se exponen al cliente. Nunca poner secrets ahí.
 
@@ -355,7 +361,7 @@ curl http://localhost:8000/health/full
 curl -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"alumno@utn.edu.ar","password":"alumno123dev"}'
-# Debe devolver {"status":"ok","data":{"access_token":"...","refresh_token":"..."}}
+# Debe devolver {"status":"ok","data":{"access_token":"..."}}
 
 # 5. Frontend accesible
 curl -s http://localhost:5173 | grep -c "AI-Native"
@@ -485,7 +491,7 @@ Si preferís PyCharm:
 # Asegurarte de estar en backend/ con el venv activo
 cd backend
 source .venv/bin/activate
-pip install -e ".[dev]"   # el -e (editable) es clave
+uv sync --frozen
 pytest tests/
 ```
 
@@ -556,24 +562,24 @@ export default defineConfig({
 ```bash
 pip show pydantic  # verificar versión
 # Si es v1:
-pip install "pydantic>=2.0"
+uv add "pydantic>=2.0"
 # O recrear el venv:
 deactivate
 rm -rf backend/.venv
 python3.12 -m venv backend/.venv
 source backend/.venv/bin/activate
-pip install -e ".[dev]"
+uv sync --frozen
 ```
 
 ### Error: `jwt.exceptions.DecodeError` en tests
 
-**Causa**: La variable `JWT_SECRET_KEY` en `.env` no está configurada o tiene el valor por defecto `CHANGE_ME`.
+**Causa**: La variable `SECRET_KEY` en `.env` no está configurada o tiene el valor por defecto `CHANGE_ME`.
 
 **Solución**:
 ```bash
 # Generar una clave válida
 openssl rand -hex 32
-# Pegar en .env en JWT_SECRET_KEY
+# Pegar en .env en SECRET_KEY
 ```
 
 ### Error de CORS en el frontend: `Access-Control-Allow-Origin`

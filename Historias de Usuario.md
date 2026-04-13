@@ -113,10 +113,10 @@ Ninguna directamente. Es infraestructura.
 #### Criterios de Aceptación
 
 - [ ] Al correr las migraciones de Alembic (`alembic upgrade head`), se crean los 4 schemas en PostgreSQL.
-- [ ] Schema `operational` contiene las tablas: `users`, `courses`, `commissions`, `exercises`, `submissions`, `code_snapshots`, `enrollments`, `tutor_interactions`, `tutor_system_prompts`.
-- [ ] Schema `cognitive` contiene las tablas: `cognitive_sessions`, `cognitive_events`, `cognitive_metrics`, `reasoning_records`.
-- [ ] Schema `governance` contiene las tablas: `governance_events`.
-- [ ] Schema `analytics` contiene las tablas: `risk_assessments`.
+- [ ] Schema `operational` contiene las tablas: `users`, `courses`, `commissions`, `exercises`, `submissions`, `code_snapshots`, `enrollments`, `tutor_interactions`.
+- [ ] Schema `cognitive` contiene las tablas: `cognitive_sessions`, `cognitive_events`, `cognitive_metrics`, `reasoning_records`, `risk_assessments`.
+- [ ] Schema `governance` contiene las tablas: `governance_events`, `tutor_system_prompts`.
+- [ ] Schema `analytics` contiene las tablas: `student_metrics`, `exercise_attempts`, `course_stats`.
 - [ ] Todos los modelos tienen `id` (UUID, server_default), `created_at`, `updated_at`.
 - [ ] Las tablas que soportan soft delete tienen `is_active` (bool) y `deleted_at` (nullable datetime). Esto incluye: `users`, `courses`, `commissions`, `exercises`, `submissions`, `enrollments`.
 - [ ] `cognitive_events` NO tiene soft delete (los eventos del CTR son inmutables por RN-7).
@@ -570,7 +570,7 @@ Ninguna directamente. Es infraestructura de calidad.
 ## EPIC 2 — Tutor IA Socrático (Semanas 3-12)
 
 > **Objetivo**: Tutor que guía mediante preguntas, nunca entrega soluciones, todo registrado.
-> **Schema owner**: `operational` (tutor_interactions), `governance`
+> **Schema owner**: `operational` (tutor_interactions)
 > **Dev asignado**: Fase 2
 
 ---
@@ -585,11 +585,11 @@ Ninguna directamente. Es infraestructura de calidad.
 
 #### Criterios de Aceptación
 
-- [ ] El endpoint WebSocket `ws://localhost:8000/ws/tutor/chat?token=<jwt>` acepta conexiones autenticadas.
+- [ ] El endpoint WebSocket `ws://localhost:8000/ws/tutor/chat?token=<jwt>` acepta conexiones autenticadas (producción usa `wss://`).
 - [ ] El token JWT se valida al momento de la conexión. Conexiones sin token o con token inválido se rechazan con código de cierre 4001.
 - [ ] El alumno envía mensajes en formato JSON: `{type: "message", content: "...", exercise_id: "uuid", session_id: "uuid"}`.
-- [ ] El backend responde con chunks de streaming: `{type: "chunk", content: "..."}` mientras el LLM genera.
-- [ ] Al finalizar, el backend envía `{type: "done", interaction_id: "uuid"}`.
+- [ ] El backend responde con chunks de streaming: `{type: "token", payload: {text: "..."}}` mientras el LLM genera.
+- [ ] Al finalizar, el backend envía `{type: "complete", payload: {session_id: "uuid"}}`.
 - [ ] Si ocurre un error (LLM caído, rate limit), el backend envía `{type: "error", code: "TUTOR_ERROR", message: "..."}`.
 - [ ] La conexión WebSocket se mantiene activa con heartbeat: el cliente envía `{type: "ping"}` cada 30s, el servidor responde `{type: "pong"}`.
 - [ ] El sistema maneja reconexión automática en el cliente: si se pierde la conexión, reintenta con backoff exponencial (max 5 intentos).
@@ -846,7 +846,7 @@ Ninguna directamente. Es infraestructura de calidad.
 ## EPIC 3 — Motor Cognitivo + Evaluación (Semanas 3-12)
 
 > **Objetivo**: Clasificar eventos cognitivos, construir CTR con hash chain, calcular métricas N4.
-> **Schema owner**: `cognitive`, `governance`, `analytics`
+> **Schema owner**: `cognitive`, `analytics`
 > **Dev asignado**: Fase 3
 
 ---
@@ -898,7 +898,7 @@ Ninguna directamente. Es infraestructura de calidad.
 
 - [ ] `POST /api/v1/cognitive/sessions` (triggered internamente al iniciar un ejercicio) crea una `cognitive_session` con estado `active`.
 - [ ] Cada `cognitive_event` registrado en la sesión actualiza el hash chain: `hash(n) = SHA256(hash(n-1) + json(datos(n)))` con keys ordenadas.
-- [ ] El primer evento tiene `previous_hash = "GENESIS"` (constante canónica).
+- [ ] El primer evento tiene `previous_hash = SHA256("GENESIS:" + session_id + ":" + started_at.isoformat())` (hash inicial derivado de la identidad de la sesión).
 - [ ] `POST /api/v1/cognitive/sessions/{id}/close` cierra la sesión, calcula el `ctr_hash_chain` final (hash del último evento), y evalúa `is_valid_ctr`.
 - [ ] `is_valid_ctr = true` solo si hay al menos 1 evento clasificado en cada nivel N1, N2, N3, N4 (RO-1).
 - [ ] `GET /api/v1/cognitive/sessions/{id}/integrity` permite verificar la integridad de la cadena: recalcula todos los hashes y compara.

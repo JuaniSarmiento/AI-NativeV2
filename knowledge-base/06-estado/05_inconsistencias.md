@@ -20,6 +20,8 @@ El log se puebla principalmente por:
 
 **El proyecto está en etapa de inicio.** No hay inconsistencias detectadas porque aún no existe código de implementación. Este log se activa a partir de la semana 3 cuando comienza el desarrollo de las fases.
 
+> **Auditoría de documentación**: 2026-04-12 — Se realizó una revisión completa de los archivos de knowledge-base (05-dx, 06-estado, 07-anexos) contra las decisiones canónicas del proyecto. Las inconsistencias encontradas fueron resueltas directamente en los archivos afectados. No quedan inconsistencias abiertas en la documentación. Los cambios principales incluyeron: corrección de timeout del sandbox (5s → 10s), JWT access token expire (30min → 15min), estructura backend (flat → feature-based), features frontend canónicas, WS auth (solo query param), `useShallow` en ejemplos Zustand, modelo Anthropic (`claude-sonnet-4-20250514`), descripción de `infra/` (Docker Compose, no Kubernetes/Terraform), y adición de `openspec/` y `scaffold-decisions.yaml` a la estructura del monorepo.
+
 ---
 
 ## Formato de Entrada

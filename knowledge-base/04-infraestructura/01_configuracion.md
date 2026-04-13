@@ -71,8 +71,8 @@ REDIS_SSL=false                     # true en producción si Redis está en clou
 # ANTHROPIC (LLM)
 # ============================================================
 ANTHROPIC_API_KEY=sk-ant-...        # Clave de API de Anthropic
-ANTHROPIC_MODEL=claude-sonnet-4-5   # Modelo para el tutor
-ANTHROPIC_MAX_TOKENS=2048           # Máximo tokens en respuesta del tutor
+ANTHROPIC_MODEL=claude-sonnet-4-20250514   # Modelo para el tutor (latest Claude Sonnet)
+ANTHROPIC_MAX_TOKENS=4096           # Máximo tokens en respuesta del tutor
 ANTHROPIC_TEMPERATURE=0.7           # Creatividad del tutor (0-1)
 ANTHROPIC_TIMEOUT=30                # Segundos máximos esperando respuesta del LLM
 
@@ -173,7 +173,7 @@ class Settings(BaseSettings):
 
     # Anthropic
     ANTHROPIC_API_KEY: str
-    ANTHROPIC_MODEL: str = "claude-sonnet-4-5"
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
     ANTHROPIC_MAX_TOKENS: int = 2048
     ANTHROPIC_TEMPERATURE: float = 0.7
     ANTHROPIC_TIMEOUT: int = 30
@@ -188,6 +188,9 @@ class Settings(BaseSettings):
     SANDBOX_TIMEOUT: int = 10
     SANDBOX_MEMORY_MB: int = 128
     SANDBOX_ALLOWED_IMPORTS: str = "math,random,statistics"
+
+    # URLs
+    FRONTEND_URL: str = "http://localhost:5173"  # En producción: https://tu-dominio.com
 
     # Logging
     LOG_LEVEL: str = "INFO"
@@ -206,8 +209,13 @@ class Settings(BaseSettings):
     @field_validator("SECRET_KEY")
     @classmethod
     def secret_key_must_be_strong(cls, v: str) -> str:
-        if len(v) < 32:
-            raise ValueError("SECRET_KEY debe tener al menos 32 caracteres")
+        if len(v) < 64:
+            raise ValueError(
+                "SECRET_KEY debe tener al menos 64 caracteres hex (256 bits). "
+                "Generar con: openssl rand -hex 32  →  produce 64 chars = 256 bits"
+            )
+        if v in ("cambiar-por-clave-aleatoria-256bits", "your-secret-key"):
+            raise ValueError("SECRET_KEY es un placeholder. Generar una clave real con openssl rand -hex 32")
         return v
 
     @model_validator(mode="after")
@@ -217,6 +225,13 @@ class Settings(BaseSettings):
                 raise ValueError("DEBUG debe ser False en producción")
             if "localhost" in self.DATABASE_URL:
                 raise ValueError("DATABASE_URL con localhost no es válido en producción")
+            if not self.REDIS_PASSWORD:
+                raise ValueError("REDIS_PASSWORD no puede estar vacío en producción")
+            if any("localhost" in origin for origin in self.ALLOWED_ORIGINS):
+                raise ValueError("ALLOWED_ORIGINS no puede contener localhost en producción")
+            frontend_url = getattr(self, "FRONTEND_URL", "")
+            if frontend_url and not frontend_url.startswith("https://"):
+                raise ValueError("FRONTEND_URL debe usar https:// en producción")
         return self
 
 
@@ -438,7 +453,7 @@ Los health checks en Docker Compose garantizan el orden correcto de startup:
 | Docker target | `development` | `production` (multi-stage build) |
 | Frontend | Vite dev server (:5173) | Nginx sirviendo bundle estático |
 | CORS origins | `localhost:5173` | Dominio HTTPS del frontend |
-| SECRET_KEY | Cualquier valor | Mínimo 32 chars, generado aleatoriamente |
+| SECRET_KEY | Cualquier valor | Mínimo 64 chars hex (256 bits), generado con `openssl rand -hex 32` |
 | Database password | `postgres` | Contraseña fuerte, Docker secret |
 | HTTPS | No | Sí (Nginx + Let's Encrypt o certificado propio) |
 | Logging | `pretty` (human-readable) | `json` (estructurado para Loki/Grafana) |

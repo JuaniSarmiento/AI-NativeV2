@@ -114,7 +114,7 @@ async def domain_exception_handler(request: Request, exc: DomainError) -> JSONRe
     status_code, code = mapping.get(type(exc), (400, "DOMAIN_ERROR"))
     return JSONResponse(
         status_code=status_code,
-        content={"ok": False, "error": {"code": code, "detail": str(exc)}},
+        content={"status": "error", "errors": [{"code": code, "detail": str(exc)}]},
     )
 ```
 
@@ -198,3 +198,4 @@ async def ask(self, request): ...
 - [ ] Schemas de response tienen `ConfigDict(from_attributes=True)` si vienen del ORM
 - [ ] Las dependencias se resuelven en `api/deps.py`, no en el router
 - [ ] `ApiResponse[T]` es el envelope de todas las respuestas exitosas
+- [ ] `ApiResponse` usa `status: "ok"` / `"error"` (string), NUNCA boolean `ok: True/False`

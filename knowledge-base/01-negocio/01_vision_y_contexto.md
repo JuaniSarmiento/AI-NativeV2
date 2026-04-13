@@ -65,10 +65,10 @@ El CTR no es un log técnico — es un artefacto interpretativo que contiene:
 
 ### Propiedades del CTR
 
-- **Inmutable post-cierre**: hash encadenado `hash(n) = SHA256(hash(n-1) + datos(n))`
-- **Auditable**: cada evento tiene hash, timestamp, contexto
+- **Inmutable post-cierre**: hash encadenado con génesis `SHA256("GENESIS:" + session_id + ":" + started_at.isoformat())` y cadena `hash(n) = SHA256(hash(n-1) + datos(n))`
+- **Auditable**: cada evento tiene su propio hash SHA-256 almacenado en el campo `event_hash` de la tabla `cognitive_events`, más un hash encadenado a nivel sesión para verificación de integridad del CTR completo
 - **Interpretable pedagógicamente**: todo dato puede ser interpretado en términos de aprendizaje
-- **Mínimo viable**: al menos 1 evento por cada N1-N4 por episodio
+- **Mínimo viable**: al menos 1 evento por cada N1-N4 por episodio. En la implementación, "episodio" mapea exactamente a `cognitive_session` — una sesión = un episodio
 
 ## Indicador Cruzado Código↔Discurso
 

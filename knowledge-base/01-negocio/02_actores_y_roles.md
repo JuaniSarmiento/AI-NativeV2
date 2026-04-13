@@ -65,7 +65,7 @@ Agente pedagógico regulado implementado sobre Anthropic Claude. No es un usuari
 - NUNCA entrega la solución completa
 - Responde con preguntas elicitadoras cuando el alumno pide la solución
 - Ofrece definiciones conceptuales cuando se pregunta por significado
-- Máximo 3-5 líneas de código de ejemplo, siempre parcial y contextual
+- Máximo 5 líneas de código por bloque de ejemplo, siempre parcial y contextual
 - Tono de andamiaje, sin paternalismo, adaptado al nivel del alumno
 - No introduce vocabulario técnico que el alumno no haya usado primero (salvo como pregunta)
 
@@ -77,7 +77,7 @@ Agente pedagógico regulado implementado sobre Anthropic Claude. No es un usuari
 5. Cierre con reflexión metacognitiva explícita
 6. No introducir vocabulario no usado por el alumno
 
-**Invariancia entre proveedores**: el comportamiento pedagógico debe permanecer invariante entre adaptadores de LLM (OpenAI, Anthropic, Ollama local). Las pruebas de conformidad pedagógica se ejecutan contra todos los adaptadores.
+**Invariancia entre proveedores**: La invariancia entre proveedores es un objetivo de diseño para versiones futuras (P3). En v1, el comportamiento se valida exclusivamente contra el adaptador de Anthropic. Los items P3 del backlog (#29, #30) cubren adaptadores OpenAI y Ollama.
 
 ## Matriz de Permisos (RBAC)
 

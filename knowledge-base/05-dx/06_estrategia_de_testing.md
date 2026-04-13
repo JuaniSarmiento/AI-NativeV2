@@ -231,6 +231,8 @@ def postgres_container():
     with PostgresContainer("postgres:16") as container:
         yield container
 
+# scope="session": el engine es costoso de crear (conexión a DB, create_all).
+# Se reutiliza para toda la suite. NO usar scope="function" aquí.
 @pytest.fixture(scope="session")
 async def engine(postgres_container):
     """Engine SQLAlchemy conectado al contenedor de test."""
@@ -252,6 +254,8 @@ async def engine(postgres_container):
     
     await engine.dispose()
 
+# scope="function" (default): cada test obtiene una sesión limpia con rollback automático.
+# Garantiza aislamiento total entre tests. NO usar scope="session" aquí.
 @pytest.fixture
 async def session(engine):
     """Sesión de base de datos con rollback automático por test."""
@@ -277,7 +281,7 @@ async def test_user(session) -> User:
     user = User(
         email="test@utn.edu.ar",
         hashed_password=hash_password("testpass"),
-        role=UserRole.STUDENT,
+        role=UserRole.ALUMNO,
     )
     session.add(user)
     await session.flush()
@@ -484,7 +488,13 @@ async def test_tutor_does_not_complete_code_snippets(tutor_service, test_session
     assert "return fibonacci" not in response.content
 ```
 
-> Estos tests **requieren llamadas reales a la API de Anthropic**. Se marcan con `@pytest.mark.adversarial` y se excluyen del CI normal (demasiado costosos y lentos). Corren en un CI separado semanal y antes de cada release.
+> Estos tests **requieren llamadas reales a la API de Anthropic**. Se marcan con `@pytest.mark.adversarial` y se excluyen del CI normal (demasiado costosos y lentos). Corren en un job de CI dedicado activado semanalmente (no en el pipeline principal). La variable de entorno `ANTHROPIC_API_KEY` debe estar configurada en los GitHub Secrets para que el job funcione.
+>
+> Durante desarrollo local, ejecutar manualmente con:
+> ```bash
+> pytest tests/adversarial/ -v
+> ```
+> No correr junto con el suite principal (`pytest tests/`), ya que generan costos de API.
 
 ---
 
@@ -678,7 +688,7 @@ from app.core.security import hash_password
 
 def make_user(
     email: str = "test@utn.edu.ar",
-    role: UserRole = UserRole.STUDENT,
+    role: UserRole = UserRole.ALUMNO,
     is_active: bool = True,
 ) -> User:
     return User(
@@ -714,14 +724,17 @@ def make_exercise(
 
 | Módulo | Objetivo | Prioridad |
 |---|---|---|
-| `app/core/hash_chain.py` | 100% | Crítico |
-| `app/services/tutor_service.py` | 90%+ | Crítico |
+| `app/core/hash_chain.py` | **100%** (target independiente) | Crítico |
+| `app/features/tutor/service.py` | 90%+ | Crítico |
 | `app/core/security.py` | 95%+ | Crítico |
-| `app/services/*` | 85%+ | Alto |
+| `app/core/` (resto) | 90%+ | Alto |
+| `app/features/*/service.py` | 85%+ | Alto |
 | `app/repositories/*` | 80%+ | Alto |
 | `app/routers/*` | 80%+ | Medio |
 | `app/schemas/*` | 70%+ | Bajo |
 | **Total** | **80%+** | |
+
+> Nota: `hash_chain.py` tiene su propio target de 100% **independiente** del objetivo del 90% para el directorio `app/core/`. El CI lo reporta como métrica separada y falla si baja del 100%.
 
 ### Medir coverage
 

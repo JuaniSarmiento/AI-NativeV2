@@ -156,6 +156,9 @@ services:
         condition: service_healthy
     expose:
       - "8000"                      # Exponer solo internamente (Nginx hace proxy)
+    # Límites de recursos — protege el host de consumo descontrolado
+    mem_limit: 512m
+    cpus: "1.0"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
       interval: 30s
@@ -223,6 +226,8 @@ volumes:
 ```
 
 ### 3.2 Nginx como reverse proxy
+
+> **ADVERTENCIA**: La configuración mostrada a continuación escucha en HTTP (puerto 80) y es solo para **desarrollo/staging interno**. En producción, Nginx DEBE tener terminación TLS (HTTPS + WSS). Sin TLS: access tokens en query string del WS viajan en plaintext y la cookie de refresh token no puede tener `Secure` flag. Ver sección 4.2 para SSL con Let's Encrypt.
 
 ```nginx
 # nginx/nginx.conf
@@ -397,7 +402,7 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]      # GitHub Flow: solo main, no develop
   pull_request:
     branches: [main]
 
@@ -425,7 +430,7 @@ jobs:
           cache: "pip"
 
       - name: Instalar dependencias de desarrollo
-        run: pip install -e ".[dev]"
+        run: uv sync --frozen
 
       - name: Ruff lint
         run: ruff check .
@@ -456,7 +461,7 @@ jobs:
           cache: "pip"
 
       - name: Instalar dependencias
-        run: pip install -e ".[dev]"
+        run: uv sync --frozen
 
       - name: Ejecutar tests
         run: pytest --cov=app --cov-report=xml --cov-fail-under=80
@@ -591,8 +596,10 @@ jobs:
             cd /opt/ai-native
             git pull origin main
             docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+            # CRÍTICO: migraciones ANTES de servir tráfico con el nuevo código
+            # Patrón: drain → migrate → deploy
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm api alembic upgrade head
             docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-            docker compose exec api alembic upgrade head
 ```
 
 ### 5.2 Secrets requeridos en GitHub
@@ -606,12 +613,15 @@ jobs:
 
 ### 5.3 Estrategia de branches
 
+**GitHub Flow** (no Gitflow):
+
 ```
-main          ← producción / staging. Solo merges de develop o hotfixes.
-develop       ← integración. Feature branches se mergean aquí.
-feature/*     ← desarrollo de features. PR a develop.
-hotfix/*      ← fixes urgentes. PR directamente a main + cherry-pick a develop.
+main          ← única rama de integración y producción. Todo merge va aquí.
+feature/*     ← desarrollo de features. PR directamente a main.
+hotfix/*      ← fixes urgentes. PR directamente a main.
 ```
+
+No existe rama `develop`. Feature branches se crean desde `main` y se mergean a `main` vía Pull Request.
 
 ---
 
@@ -644,13 +654,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ══════════════════════════════════════════════
 FROM base AS dependencies
 
-COPY pyproject.toml ./
-RUN pip install -e ".[dev]"
+# Instalar uv para builds reproducibles con lockfile
+RUN pip install --no-cache-dir uv
+
+COPY pyproject.toml uv.lock ./
+# uv sync --frozen usa uv.lock para builds 100% reproducibles (no resuelve versiones en runtime)
+RUN uv sync --frozen --no-dev
 
 # ══════════════════════════════════════════════
 # Stage 3: Development (hot reload)
 # ══════════════════════════════════════════════
-FROM dependencies AS development
+FROM base AS development
+
+# En dev instalamos también deps de desarrollo desde lockfile
+RUN pip install --no-cache-dir uv
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen  # incluye dev deps
 
 # El código se monta como volume en dev
 COPY entrypoint.sh ./
@@ -665,10 +684,11 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload
 # ══════════════════════════════════════════════
 FROM base AS production
 
-# Instalar SOLO dependencias de producción
-COPY pyproject.toml ./
-RUN pip install -e "." --no-deps \
-    && pip install $(python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(' '.join(d['project']['dependencies']))")
+# Instalar uv y dependencias de producción desde lockfile
+RUN pip install --no-cache-dir uv
+COPY pyproject.toml uv.lock ./
+# --frozen: no actualizar lockfile (build reproducible). --no-dev: sin dependencias de testing.
+RUN uv sync --frozen --no-dev
 
 # Copiar código
 COPY app/ ./app/

@@ -47,17 +47,17 @@ Principios aplicados:
 
 ```
 POST /api/v1/auth/register
-Body: { email, password, full_name, role }
+Body: { email, password, full_name }
 
 1. Validar formato email (pydantic EmailStr)
 2. Verificar email no registrado (SELECT en DB)
 3. Hashear password con bcrypt (cost factor 12)
-4. Persistir usuario en users.accounts (schema "users")
+4. Persistir usuario en operational.users con role="alumno" (asignado server-side)
 5. Retornar 201 Created (sin tokens — requiere login explícito)
 ```
 
 **Notas de diseño**:
-- El rol se asigna en el registro pero la plataforma puede restringir qué roles puede auto-asignarse un usuario (alumno por defecto, docente requiere invitación o admin).
+- El campo `role` **NO** está en el request body. El rol por defecto es `alumno`. Solo un admin puede asignar roles `docente` o `admin` via endpoint dedicado (`POST /admin/users/{id}/role`).
 - No se envían tokens en el registro para evitar que bots creen cuentas y usen recursos de LLM inmediatamente.
 
 ### 2.2 Login
@@ -72,7 +72,9 @@ Body: { email, password }
 4. Generar access token (JWT, 15 min TTL)
 5. Generar refresh token (JWT, 7 días TTL, jti único)
 6. Guardar refresh token en Redis: SET auth:refresh:{jti} {user_id} EX 604800
-7. Retornar { access_token, refresh_token, token_type: "bearer" }
+7. Retornar { access_token, token_type: "bearer" } en el body
+   + Set-Cookie: refresh_token=<token>; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth/refresh
+   (El access token va en el body para almacenarlo en Zustand; el refresh token va en cookie httpOnly para que JavaScript no pueda leerlo)
 ```
 
 ### 2.3 Uso del Access Token
@@ -92,33 +94,40 @@ Authorization: Bearer <access_token>
 
 ```
 POST /api/v1/auth/refresh
-Body: { refresh_token }
+Cookie: refresh_token=<token>  (httpOnly cookie, enviada automáticamente por el browser)
 
-1. Verificar firma JWT del refresh token
-2. Verificar exp (expirado → 401, debe re-loguearse)
-3. Buscar jti en Redis: GET auth:refresh:{jti}
-4. Si no existe → 401 (ya fue rotado o invalidado)
-5. DEL auth:refresh:{jti}                    ← invalida token viejo
-6. Generar nuevo access token (15 min)
-7. Generar nuevo refresh token (7 días, nuevo jti)
-8. SET auth:refresh:{new_jti} {user_id} EX 604800
-9. Retornar { access_token, refresh_token }
+1. Leer refresh token de la cookie httpOnly (NO del body)
+2. Verificar firma JWT del refresh token (algorithms=["HS256"])
+3. Verificar exp (expirado → 401, debe re-loguearse)
+4. Buscar jti en Redis: GET auth:refresh:{jti}
+5. Si no existe → 401 + invalidar TODAS las sesiones del usuario  ← detección de robo
+6. DEL auth:refresh:{jti}                    ← invalida token viejo
+7. Generar nuevo access token (15 min)
+8. Generar nuevo refresh token (7 días, nuevo jti)
+9. SET auth:refresh:{new_jti} {user_id} EX 604800
+10. Retornar { access_token } en el body
+    + Set-Cookie: refresh_token=<nuevo_token>; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth/refresh
 ```
 
-**Propiedad de seguridad**: si un refresh token es robado y usado por un atacante antes que el usuario legítimo, el próximo uso del usuario legítimo detectará que el token ya no existe en Redis y lo forzará a re-autenticarse. Esto indica compromiso de sesión.
+**Propiedad de seguridad**: si un refresh token es robado y el atacante lo usa antes que el usuario legítimo, el próximo intento del usuario legítimo detectará que el jti ya no existe en Redis. Esto indica compromiso de sesión → se invalidan TODAS las sesiones activas del usuario (DEL de todos los `auth:refresh:*` para ese `user_id`), forzando re-autenticación completa.
+
+**Token storage**:
+- Access token: almacenado en Zustand (memoria), se pierde al recargar la página.
+- Refresh token: en cookie httpOnly — el browser lo envía automáticamente al recargar, permitiendo obtener un nuevo access token sin re-login.
 
 ### 2.5 Logout
 
 ```
 POST /api/v1/auth/logout
 Headers: Authorization: Bearer <access_token>
-Body: { refresh_token }  (opcional pero recomendado)
+Cookie: refresh_token=<token>  (httpOnly cookie, enviada automáticamente)
 
 1. Extraer jti del access token
 2. Calcular TTL restante del access token
 3. SETEX auth:blacklist:{jti} {ttl_restante} "1"
-4. Si hay refresh_token: DEL auth:refresh:{refresh_jti}
-5. Retornar 204 No Content
+4. Leer refresh token de la cookie → DEL auth:refresh:{refresh_jti}
+5. Set-Cookie: refresh_token=; HttpOnly; Secure; Max-Age=0  ← limpia la cookie
+6. Retornar 204 No Content
 ```
 
 ---
@@ -149,7 +158,7 @@ Body: { refresh_token }  (opcional pero recomendado)
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
-| `sub` | UUID string | ID del usuario (FK a users.accounts) |
+| `sub` | UUID string | ID del usuario (FK a operational.users) |
 | `role` | enum | `alumno` \| `docente` \| `admin` |
 | `email` | string | Email para logging/audit (evita join a DB) |
 | `jti` | UUID string | JWT ID único — permite blacklist individual |
@@ -180,7 +189,7 @@ La rotación previene el reuso de tokens robados (refresh token rotation pattern
 Usuario                  Backend                     Redis
    │                        │                           │
    │── POST /auth/refresh ──>│                           │
-   │   { refresh_token: T1 } │                           │
+   │   Cookie: refresh_token=T1 │                        │
    │                        │── GET auth:refresh:{jti1} ─>│
    │                        │<── user_id ────────────────│
    │                        │── DEL auth:refresh:{jti1} ─>│  ← invalida T1
@@ -242,15 +251,17 @@ def verify_password(plain: str, hashed: str) -> bool:
 | Recurso / Acción | alumno | docente | admin |
 |------------------|--------|---------|-------|
 | `POST /tutor/session` | Propias | — | Todas |
-| `GET /tutor/session/{id}` | Propias | Alumnos a cargo | Todas |
-| `GET /tutor/history` | Propio | Alumnos a cargo | Todos |
+| `GET /tutor/session/{id}` | Propias | Alumnos de su comisión (read-only) | Todas |
+| `GET /tutor/history` | Propio | Alumnos de su comisión (read-only) | Todos |
 | `POST /exercises` | — | Si es del curso | Todas |
 | `GET /exercises` | Del curso | Del curso | Todas |
-| `GET /analytics/student/{id}` | Propio | Alumnos a cargo | Todos |
+| `GET /submissions/{id}` | Propias | Alumnos de su comisión (read-only) | Todas |
+| `GET /analytics/student/{id}` | Propio | Alumnos de su comisión | Todos |
 | `GET /analytics/course/{id}` | — | Su curso | Todas |
-| `GET /ctr/chain/{session_id}` | Propia | Alumnos a cargo | Todas |
+| `GET /ctr/chain/{session_id}` | Propia | Alumnos de su comisión (read-only) | Todas |
 | `POST /admin/users` | — | — | Si |
 | `DELETE /admin/users/{id}` | — | — | Si |
+| `POST /admin/users/{id}/role` | — | — | Si |
 | `GET /admin/system` | — | — | Si |
 | `GET /health` | Si | Si | Si |
 
@@ -328,7 +339,7 @@ async def get_own_session(
 
 ## 7. Autenticación WebSocket
 
-Las conexiones WebSocket no pueden enviar headers HTTP customizados después del handshake inicial. La solución es pasar el JWT como query parameter en la URL de conexión.
+Las conexiones WebSocket no pueden enviar headers HTTP customizados después del handshake inicial. La solución canónica es pasar el JWT como query parameter en la URL de conexión (`?token=`). La autenticación ocurre ANTES del upgrade, en el handshake. No se usa autenticación por "primer mensaje" — si el token es inválido, la conexión se rechaza antes de hacer `websocket.accept()`.
 
 ### 7.1 Flujo de handshake
 
@@ -361,8 +372,9 @@ async def tutor_websocket(
     token: str = Query(..., description="JWT access token"),
 ):
     # Autenticar ANTES de hacer el accept()
+    # decode_token usa algorithms=["HS256"] explícitamente (ver jwt.py, sección 12.1)
     try:
-        payload = decode_token(token)
+        payload = decode_token(token)  # raises si inválido/expirado; enforce algorithms=["HS256"]
         if await is_blacklisted(payload["jti"]):
             await websocket.close(code=4001, reason="Token invalidado")
             return
@@ -434,7 +446,7 @@ class SlidingWindowRateLimiter:
 
 | Endpoint | Clave Redis | Límite | Ventana | Justificación |
 |----------|-------------|--------|---------|---------------|
-| `POST /tutor/message` | `rl:tutor:{user_id}` | 30 | 3600s (1h) | Controla costo de API Anthropic |
+| `POST /tutor/message` | `rl:tutor:{user_id}:{exercise_id}` | 30 | 3600s (1h) | Controla costo de API Anthropic, límite por ejercicio |
 | `POST /api/v1/*` | `rl:api:{ip}` | 100 | 60s | Previene flooding general |
 | `POST /auth/login` | `rl:login:{ip}` | 10 | 300s (5min) | Previene brute force |
 | `POST /auth/register` | `rl:register:{ip}` | 5 | 3600s | Previene creación masiva de cuentas |
@@ -456,9 +468,10 @@ def rate_limit(limit: int, window_seconds: int, scope: str = "api"):
         limiter = SlidingWindowRateLimiter(request.app.state.redis)
 
         if scope == "tutor" and current_user:
-            key = f"rl:tutor:{current_user['sub']}"
-        elif scope == "auth":
-            key = f"rl:auth:{request.client.host}"
+            exercise_id = request.path_params.get("exercise_id") or request.query_params.get("exercise_id", "default")
+            key = f"rl:tutor:{current_user['sub']}:{exercise_id}"
+        elif scope == "login":
+            key = f"rl:login:{request.client.host}"
         else:
             key = f"rl:api:{request.client.host}"
 
@@ -489,7 +502,7 @@ ALLOWED_ORIGINS_PROD = [settings.FRONTEND_URL]  # desde env var
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS_DEV if settings.DEBUG else ALLOWED_ORIGINS_PROD,
-    allow_credentials=True,          # necesario para cookies si se migra a httpOnly
+    allow_credentials=True,          # necesario para cookies httpOnly (refresh token)
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
     expose_headers=["X-Request-ID", "X-RateLimit-Remaining"],
@@ -500,7 +513,7 @@ app.add_middleware(
 **Notas**:
 - En desarrollo: solo `http://localhost:5173` (puerto del Vite dev server).
 - En producción: dominio HTTPS del frontend, configurado via `FRONTEND_URL` env var.
-- `allow_credentials=True` es necesario si se migra a cookies httpOnly en el futuro.
+- `allow_credentials=True` es necesario para que el browser envíe la cookie httpOnly del refresh token.
 - El wildcard `"*"` en `allow_origins` está **explícitamente prohibido** — rompe `allow_credentials`.
 
 ---
@@ -533,14 +546,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Content-Security-Policy — ajustar según necesidades del frontend
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline'; "   # Monaco Editor requiere inline
+            "script-src 'self' 'wasm-unsafe-eval'; "   # Monaco Editor requiere wasm-unsafe-eval para WASM workers. NO usar unsafe-inline.
             "style-src 'self' 'unsafe-inline'; "    # TailwindCSS inline styles
-            "connect-src 'self' ws://localhost:8000 wss:; "
+            "connect-src 'self' wss:; "             # Solo WSS (TLS) en producción. ws:// solo en dev via override local.
             "img-src 'self' data:; "
             "font-src 'self' data:; "
             "object-src 'none'; "
             "frame-ancestors 'none'"
         )
+        # NOTA: En desarrollo local, se puede agregar ws://localhost:8000 en connect-src via middleware condicional.
+        # En producción: NUNCA incluir ws:// ni 'unsafe-inline' en script-src.
 
         return response
 ```
@@ -554,7 +569,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 | `X-XSS-Protection` | `1; mode=block` | Activa filtro XSS del browser (legacy, complemento a CSP) |
 | `HSTS` | `max-age=31536000; includeSubDomains` | Fuerza HTTPS por 1 año. Solo en producción |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | Limita qué URL se envía en el header Referer |
-| `CSP` | (ver arriba) | Previene XSS declarando fuentes permitidas de contenido |
+| `CSP` | `script-src 'self' 'wasm-unsafe-eval'`, `connect-src 'self' wss:` | Previene XSS declarando fuentes permitidas. NO `unsafe-inline` en `script-src`. |
 | `Permissions-Policy` | (ver arriba) | Desactiva APIs del browser no usadas (cámara, etc.) |
 
 ---
@@ -690,5 +705,5 @@ async def get_student_sessions(
 
 **Referencias internas**:
 - `knowledge-base/03-seguridad/02_superficie_de_ataque.md` — análisis de vectores de ataque
-- `knowledge-base/02-arquitectura/03_decisiones_tecnicas.md` — decisiones de diseño de seguridad
+- `knowledge-base/02-arquitectura/07_adrs.md` — decisiones de diseño de seguridad
 - `scaffold-decisions.yaml` — fuente de verdad de configuración de seguridad

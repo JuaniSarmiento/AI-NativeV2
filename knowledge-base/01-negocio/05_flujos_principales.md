@@ -74,7 +74,7 @@ Alumno envía mensaje ──► Pre-procesador
                               │
                               ▼
                          Post-procesador / Guardrails
-                          ├─ ¿Contiene bloques de código > N líneas? → reformular
+                          ├─ ¿Contiene bloques de código > 5 líneas? → reformular
                           ├─ ¿Es solución completa? → reformular
                           ├─ ¿Viola políticas socráticas? → reformular
                           │
@@ -158,7 +158,7 @@ Event Classifier
 CTR Builder
 ├─ Agrupa eventos por cognitive_session
 ├─ Calcula hash encadenado:
-│   hash(1) = SHA256(datos(1))
+│   hash(génesis) = SHA256("GENESIS:" + session_id + ":" + started_at.isoformat())
 │   hash(n) = SHA256(hash(n-1) + datos(n))
 ├─ Incrementa sequence_number
 └─ Al cierre de sesión:
@@ -193,7 +193,7 @@ Flujo de auditoría que puede ejecutarse en cualquier momento.
 1. Seleccionar cognitive_session por ID
 2. Obtener todos los cognitive_events ordenados por sequence_number
 3. Recalcular hash chain desde cero:
-   ├─ hash_computed(1) = SHA256(datos(1))
+   ├─ hash_computed(génesis) = SHA256("GENESIS:" + session_id + ":" + started_at.isoformat())
    ├─ hash_computed(n) = SHA256(hash_computed(n-1) + datos(n))
 4. Comparar hash_computed(último) con ctr_hash_chain almacenado
 5. Si coinciden → CTR íntegro

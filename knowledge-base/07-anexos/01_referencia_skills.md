@@ -150,8 +150,8 @@ async def find_all_with_submissions(self) -> list[Exercise]:
 
 ```python
 # PATRÓN: Modelo multi-schema
-class CognitiveTraceRecord(Base):
-    __tablename__ = "cognitive_trace_records"
+class CognitiveEvent(Base):
+    __tablename__ = "cognitive_events"
     __table_args__ = {"schema": "cognitive"}  # OBLIGATORIO
     
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -232,7 +232,7 @@ export const useAuthStore = create<AuthStore>()(
       }),
       {
         name: 'auth-store',
-        partialize: (state) => ({ user: state.user, accessToken: state.accessToken }),
+        partialize: (state) => ({ user: state.user }),  // accessToken NO se persiste — vive solo en memoria
       }
     ),
     { name: 'AuthStore' }
@@ -328,7 +328,7 @@ const buttonVariants = cva(
 AUTH_TOKEN_KEY = "ainative:auth:token:{token_jti}"
 USER_SESSION_KEY = "ainative:session:user:{user_id}"
 EXERCISE_CACHE_KEY = "ainative:cache:exercise:{exercise_id}"
-TUTOR_RATE_LIMIT_KEY = "ainative:rate_limit:tutor:user:{user_id}"
+TUTOR_RATE_LIMIT_KEY = "rl:tutor:{user_id}:{exercise_id}"
 ```
 
 **TTL obligatorio**: Todo lo que se escribe en Redis debe tener TTL.
@@ -357,13 +357,13 @@ async def get_all_user_sessions(user_id: UUID) -> list[str]:
 # NUNCA: keys = await redis.keys("ainative:session:*")  # bloquea Redis
 ```
 
-**Pub/Sub para eventos del tutor**:
+**Redis Streams para eventos del tutor**:
 
 ```python
-# PATRÓN: Publicar evento
-await redis.publish(
+# PATRÓN: Publicar evento via Redis Streams (XADD)
+await redis.xadd(
     f"ainative:tutor:session:{session_id}",
-    json.dumps({"type": "message", "content": text_chunk})
+    {"type": "message", "content": text_chunk}
 )
 ```
 
@@ -492,7 +492,7 @@ current_user: User = Depends(require_role(UserRole.PROFESSOR, UserRole.ADMIN))
 ```python
 # PATRÓN: Rate limiting sliding window
 async def check_rate_limit(user_id: UUID, action: str, limit: int, window: int):
-    key = f"ainative:rate_limit:{action}:{user_id}"
+    key = f"rl:{action}:{user_id}:{exercise_id}"
     count = await redis.incr(key)
     if count == 1:
         await redis.expire(key, window)

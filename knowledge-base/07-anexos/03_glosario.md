@@ -33,7 +33,7 @@ Este glosario define los conceptos centrales del dominio de la plataforma, extra
 
 **Importancia pedagógica**: La trazabilidad permite evaluar el proceso de aprendizaje y no solo el producto final. Un alumno que llega a la solución correcta después de un proceso rico de exploración y error tiene mayor valor cognitivo que uno que copia la solución.
 
-**En el código**: Implementada en el schema `cognitive` de PostgreSQL, principalmente en la tabla `cognitive_trace_records`. El servicio `ctr_service.py` gestiona la creación y consulta de estos registros.
+**En el código**: Implementada en el schema `cognitive` de PostgreSQL, principalmente en la tabla `cognitive_events`. El servicio `ctr_service.py` gestiona la creación y consulta de estos registros.
 
 ---
 
@@ -41,7 +41,13 @@ Este glosario define los conceptos centrales del dominio de la plataforma, extra
 
 **Definición**: Taxonomía de cuatro niveles para clasificar la profundidad del procesamiento cognitivo de un estudiante durante la resolución de un problema. Basado en adaptaciones de la Taxonomía de Bloom aplicadas específicamente al contexto de programación y uso de IA.
 
-### Nivel N1 — Memorización y Reconocimiento
+**Referencia rápida de niveles**:
+- **N1** = Comprensión (memorización, reconocimiento, reproducción)
+- **N2** = Estrategia (comprensión, explicación, establecimiento de relaciones)
+- **N3** = Validación (aplicación, resolución, evaluación de trade-offs)
+- **N4** = Interacción con IA (síntesis crítica, metacognición, cuestionamiento del tutor)
+
+### Nivel N1 — Comprensión (Memorización y Reconocimiento)
 
 **Descripción**: El estudiante reproduce información sin transformarla. Copia sintaxis, repite patrones previamente vistos, o sigue instrucciones paso a paso sin comprensión.
 
@@ -53,7 +59,7 @@ Este glosario define los conceptos centrales del dominio de la plataforma, extra
 
 **Implicación pedagógica**: No es un nivel malo per se (es necesario en las primeras etapas), pero si persiste en semestres avanzados indica dependencia.
 
-### Nivel N2 — Comprensión y Explicación
+### Nivel N2 — Estrategia (Comprensión y Explicación)
 
 **Descripción**: El estudiante puede explicar conceptos con sus propias palabras, identificar errores básicos, y establecer relaciones entre conceptos conocidos.
 
@@ -63,7 +69,7 @@ Este glosario define los conceptos centrales del dominio de la plataforma, extra
 - Puede explicar al tutor qué intenta hacer, aunque no lo logre implementar.
 - Hace preguntas de "¿por qué?" además de "¿cómo?".
 
-### Nivel N3 — Aplicación y Resolución
+### Nivel N3 — Validación (Aplicación y Resolución)
 
 **Descripción**: El estudiante puede aplicar conceptos conocidos a nuevos problemas, seleccionar la herramienta adecuada para cada situación, y depurar errores no triviales.
 
@@ -73,7 +79,7 @@ Este glosario define los conceptos centrales del dominio de la plataforma, extra
 - Corrige errores de forma autónoma entre intentos.
 - Usa el tutor para validar su razonamiento, no para obtener la solución.
 
-### Nivel N4 — Síntesis Crítica y Metacognición
+### Nivel N4 — Interacción con IA (Síntesis Crítica y Metacognición)
 
 **Descripción**: El estudiante puede crear soluciones originales, evaluar críticamente el uso de IA, y reflexionar sobre su propio proceso de aprendizaje.
 
@@ -123,7 +129,7 @@ Donde:
   "id": "uuid",
   "session_id": "uuid",
   "user_id": "uuid",
-  "event_type": "code_submission | tutor_message | tutor_response | error_encountered | hint_requested",
+  "event_type": "session.started | reads_problem | code.snapshot | tutor.question_asked | tutor.response_received | code.run | submission.created | reflection.submitted | session.closed",
   "content": { /* contenido variable según event_type */ },
   "cognitive_signal": "N1 | N2 | N3 | N4 | NEUTRAL",
   "ai_involvement": "none | requested | provided | critical | dependent",
@@ -137,7 +143,7 @@ Donde:
 
 **Integridad**: La cadena de hashes garantiza que no se pueden insertar, modificar, ni eliminar registros sin ser detectado.
 
-**En el código**: Tabla `cognitive.cognitive_trace_records`. No tiene columnas `is_active` ni `deleted_at`. El repositorio `ctr_repository.py` solo expone operaciones de creación y lectura (no update ni delete).
+**En el código**: Tabla `cognitive.cognitive_events`. No tiene columnas `is_active` ni `deleted_at`. El repositorio `ctr_repository.py` solo expone operaciones de creación y lectura (no update ni delete).
 
 ---
 
@@ -145,21 +151,21 @@ Donde:
 
 **Definición**: Acción específica del estudiante que tiene significado en términos de procesamiento cognitivo. No toda interacción con el sistema es un evento cognitivo: escribir una línea de código es una acción, pero "intentar resolver el problema con un enfoque completamente diferente después de un error" es un evento cognitivo.
 
-**Tipos de eventos cognitivos registrados**:
+**Tipos de eventos cognitivos registrados (catálogo canónico)**:
 
 | Tipo | Descripción | Señal cognitiva |
 |---|---|---|
-| `code_submission` | El alumno envía código para evaluación | Variable (depende del resultado) |
-| `tutor_message` | El alumno envía un mensaje al tutor | Variable (depende del contenido) |
-| `tutor_response` | El tutor responde (registrado para análisis) | NEUTRAL |
-| `error_encountered` | El código del alumno falla en los tests | NEUTRAL |
-| `hint_requested` | El alumno pide una pista explícitamente | N1 (si es el primer intento) o N2 |
-| `approach_change` | El alumno abandona su enfoque y empieza uno nuevo | N2-N3 |
-| `self_correction` | El alumno corrige un error sin intervención del tutor | N2-N3 |
-| `critical_question` | El alumno cuestiona el razonamiento del tutor | N4 |
-| `metacognitive_comment` | El alumno reflexiona sobre su propio proceso | N4 |
+| `session.started` | Se inicia una sesión de tutor para un ejercicio | NEUTRAL |
+| `reads_problem` | El alumno marca que leyó el enunciado | NEUTRAL |
+| `code.snapshot` | El alumno guarda un snapshot de su código en progreso | Variable |
+| `tutor.question_asked` | El alumno envía un mensaje al tutor | Variable (depende del contenido) |
+| `tutor.response_received` | El tutor responde (registrado para análisis) | NEUTRAL |
+| `code.run` | El alumno ejecuta su código en el sandbox | Variable |
+| `submission.created` | El alumno envía código para evaluación formal | Variable (depende del resultado) |
+| `reflection.submitted` | El alumno completa la reflexión post-sesión | N3-N4 |
+| `session.closed` | Se cierra la sesión de tutor | NEUTRAL |
 
-**En el código**: El campo `event_type` en el modelo `CognitiveTraceRecord` y en el schema `CTRResponse`.
+**En el código**: El campo `event_type` en el modelo `CognitiveEvent` y en el schema `CTRResponse`.
 
 ---
 
@@ -167,9 +173,9 @@ Donde:
 
 **Definición**: Secuencia coherente de eventos cognitivos que representan un ciclo completo de resolución de un sub-problema. Un ejercicio puede contener múltiples episodios cognitivos (p.ej. resolver el caso base de una función recursiva es un episodio; luego resolver el caso recursivo es otro).
 
-**Distinción de sesión**: Una sesión de tutor contiene múltiples episodios. Los episodios son segmentos del proceso de aprendizaje que el sistema detecta automáticamente mediante análisis de los CTRs.
+**Distinción de sesión**: En la implementación, "episodio" mapea exactamente a `cognitive_session` — una sesión = un episodio. Los episodios son segmentos del proceso de aprendizaje que el sistema detecta automáticamente mediante análisis de los CTRs.
 
-**En el código**: No tiene tabla propia — se detectan y calculan a partir de los CTRs. El `scoring_service.py` tiene una función `identify_episodes(ctrs: list[CognitiveTraceRecord]) -> list[Episode]`.
+**En el código**: No tiene tabla propia — se detectan y calculan a partir de los CTRs. El `scoring_service.py` tiene una función `identify_episodes(ctrs: list[CognitiveEvent]) -> list[Episode]`.
 
 ---
 
@@ -277,7 +283,7 @@ Donde:
 
 **Funcionamiento**:
 ```
-CTR_1: hash = SHA256(content_1 + NULL)
+CTR_1: hash = SHA256("GENESIS:" + session_id + ":" + started_at.isoformat())
 CTR_2: hash = SHA256(content_2 + hash_CTR_1)
 CTR_3: hash = SHA256(content_3 + hash_CTR_2)
 ...
@@ -290,7 +296,7 @@ Si se modifica el contenido de `CTR_2`, su hash cambia, lo que hace que el hash 
 
 **Requisito de determinismo**: La serialización del contenido para el cálculo del hash debe ser determinista. Se usa `json.dumps(content, sort_keys=True)` para garantizar que el mismo objeto Python siempre produce el mismo JSON string.
 
-**En el código**: `app/core/hash_chain.py`. La tabla `cognitive.cognitive_trace_records` tiene las columnas `hash` y `previous_hash`. El `ctr_service.py` calcula el hash antes de cada inserción.
+**En el código**: `app/core/hash_chain.py`. La tabla `cognitive.cognitive_events` tiene las columnas `hash` y `previous_hash`. El `ctr_service.py` calcula el hash antes de cada inserción.
 
 ---
 

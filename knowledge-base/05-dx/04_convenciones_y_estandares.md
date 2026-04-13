@@ -30,27 +30,36 @@ Estas convenciones son **obligatorias** para todos los desarrolladores del proye
 
 ### Backend (Python)
 
-Todo en `snake_case.py`:
+Todo en `snake_case.py`. La estructura es **feature-based** dentro de `app/features/`:
 
 ```
 backend/app/
-├── routers/
-│   ├── auth_router.py          # NO: authRouter.py, auth.py, auth-router.py
-│   ├── exercise_router.py
-│   └── tutor_router.py
-├── services/
-│   ├── auth_service.py
-│   ├── exercise_service.py
-│   └── tutor_service.py
-├── repositories/
-│   ├── user_repository.py
-│   └── exercise_repository.py
-├── models/
-│   ├── user_model.py
-│   └── exercise_model.py
-├── schemas/
-│   ├── auth_schemas.py         # múltiples schemas en un archivo por feature
-│   └── exercise_schemas.py
+├── features/
+│   ├── auth/
+│   │   ├── router.py           # NO: authRouter.py — un router por feature dentro de su carpeta
+│   │   ├── service.py
+│   │   ├── repository.py
+│   │   ├── models.py
+│   │   └── schemas.py
+│   ├── courses/
+│   │   └── ...
+│   ├── exercises/
+│   │   └── ...
+│   ├── sandbox/
+│   │   └── ...
+│   ├── tutor/
+│   │   └── ...
+│   ├── cognitive/
+│   │   └── ...
+│   ├── evaluation/
+│   │   └── ...
+│   └── governance/
+│       └── ...
+├── shared/
+│   ├── db/
+│   ├── models/
+│   ├── repositories/
+│   └── schemas/
 └── tests/
     ├── test_auth_service.py    # siempre con prefijo test_
     └── test_exercise_router.py
@@ -105,8 +114,8 @@ created_at = datetime.now(UTC)
 
 # Funciones
 def get_user_by_id(user_id: UUID) -> User: ...
-def create_cognitive_trace_record(data: CreateCTRRequest) -> CognitiveTraceRecord: ...
-def validate_hash_chain(records: list[CognitiveTraceRecord]) -> bool: ...
+def create_cognitive_event(data: CreateCTRRequest) -> CognitiveEvent: ...
+def validate_hash_chain(records: list[CognitiveEvent]) -> bool: ...
 
 # Métodos de clase
 class UserRepository:
@@ -207,7 +216,7 @@ class PaginatedExercisesResponse(BaseModel):
     total: int
     page: int
     per_page: int
-    pages: int
+    total_pages: int
 ```
 
 ### Convenciones de nombres
@@ -283,16 +292,18 @@ class User(Base):                     # NO: Users, user, USERS
         nullable=False,
     )
     
-    # Soft delete: es_active + deleted_at (excepto CTR)
+    # Soft delete: is_active + deleted_at
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # EXCEPCIÓN: los modelos del CTR (cognitive_events, code_snapshots, governance_events)
+    # NO tienen is_active ni deleted_at — son inmutables por diseño (hash chain).
 ```
 
 ### Nombres de tablas y columnas
 
 ```python
 # Tablas: plural, snake_case, en el schema correcto
-__tablename__ = "cognitive_trace_records"   # NO: CognitiveTraceRecord, ctr
+__tablename__ = "cognitive_events"   # NO: CognitiveEvent, ctr
 __table_args__ = {"schema": "cognitive"}
 
 # Columnas: snake_case, descriptivo
@@ -303,7 +314,7 @@ is_active: Mapped[bool]         # booleanos con prefijo is_/has_/can_
 
 # Índices: ix_{tabla}_{columna(s)}
 Index("ix_users_email", User.email, unique=True)
-Index("ix_ctrs_user_created", CognitiveTraceRecord.user_id, CognitiveTraceRecord.created_at)
+Index("ix_ctrs_user_created", CognitiveEvent.user_id, CognitiveEvent.created_at)
 ```
 
 ---
@@ -553,9 +564,13 @@ src/
 │   │   ├── api/
 │   │   │   └── authApi.ts
 │   │   └── types.ts
-│   ├── exercises/
+│   ├── student/         # Dashboard alumno, vista ejercicio, reflexión
 │   │   └── ...
-│   └── tutor/
+│   ├── teacher/         # Dashboard docente, traza cognitiva, reportes
+│   │   └── ...
+│   ├── exercise/        # Monaco editor, ejecución, submission
+│   │   └── ...
+│   └── shared/          # Componentes compartidos entre features
 │       └── ...
 ├── shared/
 │   ├── components/
@@ -691,7 +706,7 @@ type ExerciseStatus = 'pending' | 'in_progress' | 'completed'
 ```python
 # Docstrings en servicios y funciones públicas importantes
 async def compute_cognitive_score(
-    ctr_records: list[CognitiveTraceRecord],
+    ctr_records: list[CognitiveEvent],
     rubric: ScoringRubric,
 ) -> CognitiveScore:
     """
@@ -699,8 +714,8 @@ async def compute_cognitive_score(
     
     El algoritmo aplica la rúbrica del modelo N4 (Ver: empate3 §3.2) a los
     eventos cognitivos registrados en los CTR. Retorna un puntaje con
-    desglose por dimensión (N1: memorización, N2: comprensión, N3: aplicación,
-    N4: síntesis crítica).
+    desglose por dimensión (N1: comprensión, N2: estrategia, N3: validación,
+    N4: interacción con IA).
     
     Args:
         ctr_records: Lista de CTR de la sesión a evaluar.

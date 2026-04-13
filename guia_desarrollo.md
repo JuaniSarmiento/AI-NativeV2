@@ -66,7 +66,7 @@ Cada fase es **dueña exclusiva** de su schema de base de datos. Esta regla no e
 
 ```
 EPIC 0 + 1 → dueños de operational
-EPIC 2     → dueño de governance (comparte operational para tutor_interactions)
+EPIC 2     → escribe en operational.tutor_interactions (tabla en schema operational, escrita por Fase 2). Produce governance_events vía event bus (schema governance propiedad de Fase 3)
 EPIC 3     → dueño de cognitive + analytics
 EPIC 4     → no escribe en ningún schema directamente
 ```
@@ -364,7 +364,7 @@ class ExerciseService:
             total=total,
             page=page,
             per_page=per_page,
-            pages=math.ceil(total / per_page) if total > 0 else 0,
+            total_pages=math.ceil(total / per_page) if total > 0 else 0,
         )
 
     async def soft_delete_exercise(self, exercise_id: UUID, current_user: User) -> None:
@@ -593,7 +593,7 @@ class PaginatedExercisesResponse(BaseModel):
     total: int
     page: int
     per_page: int
-    pages: int
+    total_pages: int
 
 # 6. Params de filtrado
 class ExerciseFilterParams(BaseModel):
@@ -937,17 +937,17 @@ export const useExerciseStore = create<ExerciseStore>()(
   )
 )
 
-// 5. Selectores memoizados con useShallow para evitar re-renders innecesarios
+// 5. Selectores individuales — patrón canónico correcto
 // Importar así en los hooks: useShallow de 'zustand/react/shallow'
 
-// Uso correcto con useShallow:
+// Uso correcto (selectores individuales — patrón canónico):
+// const exercises = useExerciseStore((state) => state.exercises)
+// const isLoading = useExerciseStore((state) => state.isLoading)
+
+// Uso con useShallow — solo cuando necesitás seleccionar un objeto o array completo:
 // const { exercises, isLoading } = useExerciseStore(
 //   useShallow((state) => ({ exercises: state.exercises, isLoading: state.isLoading }))
 // )
-
-// Uso incorrecto (causa re-renders en cada cambio del store):
-// const exercises = useExerciseStore((state) => state.exercises)
-// const isLoading = useExerciseStore((state) => state.isLoading)
 ```
 
 **Cuándo usar `persist` middleware:**
@@ -976,7 +976,7 @@ import type { FC } from 'react'
 import { useParams } from 'react-router'
 import { useExercise } from '../hooks/useExercise'
 import { MonacoEditor } from './MonacoEditor'
-import { TutorChat } from '@/features/tutor/components/TutorChat'
+import { TutorChat } from '@/features/exercise/components/TutorChat'
 
 export const ExercisePage: FC = () => {
   const { exerciseId } = useParams<{ exerciseId: string }>()
@@ -1108,7 +1108,7 @@ export const exercisesHandlers = [
       total: filtered.length,
       page,
       perPage,
-      pages: Math.ceil(filtered.length / perPage),
+      totalPages: Math.ceil(filtered.length / perPage),
     }
 
     return HttpResponse.json({ status: 'ok', data: response })
@@ -1615,7 +1615,7 @@ return SuccessResponse(data=resultado)
 
 # Respuesta paginada
 return SuccessResponse(
-    data=PaginatedXResponse(items=[...], total=100, page=1, per_page=20, pages=5),
+    data=PaginatedXResponse(items=[...], total=100, page=1, per_page=20, total_pages=5),
     meta={"query_time_ms": 45}
 )
 # → {"status": "ok", "data": {"items": [...], "total": 100, ...}, "meta": {...}}

@@ -64,7 +64,7 @@ class BaseRepository(Generic[ModelType]):
         """Solo retorna entidades no eliminadas (soft delete)."""
         stmt = select(self.model).where(
             self.model.id == id,
-            self.model.is_active == True
+            self.model.is_active.is_(True)
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -78,7 +78,7 @@ class BaseRepository(Generic[ModelType]):
         """Retorna (items, total_count) para paginación."""
         stmt = select(self.model)
         if only_active and hasattr(self.model, "is_active"):
-            stmt = stmt.where(self.model.is_active == True)
+            stmt = stmt.where(self.model.is_active.is_(True))
         
         # Count query
         from sqlalchemy import func
@@ -171,7 +171,7 @@ class SubmissionRepository(BaseRepository[Submission]):
             .where(
                 Submission.exercise_id == exercise_id,
                 Enrollment.commission_id == commission_id,
-                Enrollment.is_active == True
+                Enrollment.is_active.is_(True)
             )
             .options(selectinload(Submission.student))
             .order_by(Submission.submitted_at.desc())
@@ -256,8 +256,9 @@ class UnitOfWork:
     def _init_repositories(self):
         """Inicializa todos los repositorios con la sesión actual."""
         self.submissions = SubmissionRepository(self.session)
-        self.cognitive = CognitiveRepository(self.session)
-        self.governance = GovernanceRepository(self.session)
+        self.cognitive_events = CognitiveRepository(self.session)
+        self.tutor_interactions = TutorInteractionRepository(self.session)
+        self.governance_events = GovernanceRepository(self.session)
         # Agregar más repos según se necesiten
     
     async def commit(self) -> None:
@@ -619,20 +620,20 @@ class DomainEvent:
 
 @dataclass
 class SubmissionCreatedEvent(DomainEvent):
-    event_type: str = "submission.created"
-    submission_id: UUID = None
-    student_id: UUID = None
-    exercise_id: UUID = None
+    submission_id: UUID = field(default_factory=uuid4)
+    student_id: UUID = field(default_factory=uuid4)
+    exercise_id: UUID = field(default_factory=uuid4)
     code: str = ""
+    event_type: str = "submission.created"
 
 
 @dataclass
 class TutorInteractionCompletedEvent(DomainEvent):
+    interaction_id: UUID = field(default_factory=uuid4)
+    student_id: UUID = field(default_factory=uuid4)
+    exercise_id: UUID = field(default_factory=uuid4)
+    n4_level: int | None = None
     event_type: str = "tutor.interaction_completed"
-    interaction_id: UUID = None
-    student_id: UUID = None
-    exercise_id: UUID = None
-    n4_level: int = None
 
 
 class EventBus:
@@ -1166,7 +1167,7 @@ class LLMMessage:
 
 @dataclass
 class LLMStreamChunk:
-    content: str
+    text: str
     is_final: bool
     tokens_used: int | None = None
     model_version: str | None = None
@@ -1178,20 +1179,24 @@ class LLMAdapter(Protocol):
     El TutorService solo conoce este Protocol, nunca las implementaciones.
     """
     
-    async def stream_chat(
+    async def stream(
         self,
-        system_prompt: str,
         messages: list[LLMMessage],
-        max_tokens: int = 300
+        *,
+        system: str | None = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
     ) -> AsyncIterator[LLMStreamChunk]:
-        """Retorna un async iterator de chunks para streaming."""
+        """Retorna un async iterator de chunks para streaming token a token."""
         ...
     
     async def complete(
         self,
-        system_prompt: str,
         messages: list[LLMMessage],
-        max_tokens: int = 300
+        *,
+        system: str | None = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
     ) -> str:
         """Retorna la respuesta completa (sin streaming)."""
         ...
@@ -1205,16 +1210,18 @@ class AnthropicAdapter:
     Usa la librería oficial anthropic[async].
     """
     
-    def __init__(self, api_key: str, model: str = "claude-sonnet-4-5"):
+    def __init__(self, api_key: str, model: str = "claude-sonnet-4-20250514"):
         import anthropic
         self.client = anthropic.AsyncAnthropic(api_key=api_key)
         self.model = model
     
-    async def stream_chat(
+    async def stream(
         self,
-        system_prompt: str,
         messages: list[LLMMessage],
-        max_tokens: int = 300
+        *,
+        system: str | None = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
     ) -> AsyncIterator[LLMStreamChunk]:
         anthropic_messages = [
             {"role": m.role, "content": m.content}
@@ -1222,28 +1229,39 @@ class AnthropicAdapter:
             if m.role != "system"
         ]
         
-        async with self.client.messages.stream(
+        kwargs = dict(
             model=self.model,
-            system=system_prompt,
             messages=anthropic_messages,
-            max_tokens=max_tokens
-        ) as stream:
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        if system:
+            kwargs["system"] = system
+
+        async with self.client.messages.stream(**kwargs) as stream:
             async for text in stream.text_stream:
-                yield LLMStreamChunk(content=text, is_final=False)
+                yield LLMStreamChunk(text=text, is_final=False)
             
             final = await stream.get_final_message()
             yield LLMStreamChunk(
-                content="",
+                text="",
                 is_final=True,
                 tokens_used=final.usage.output_tokens,
                 model_version=final.model
             )
     
-    async def complete(self, system_prompt: str, messages: list[LLMMessage], max_tokens: int = 300) -> str:
+    async def complete(
+        self,
+        messages: list[LLMMessage],
+        *,
+        system: str | None = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
+    ) -> str:
         chunks = []
-        async for chunk in self.stream_chat(system_prompt, messages, max_tokens):
+        async for chunk in self.stream(messages, system=system, max_tokens=max_tokens, temperature=temperature):
             if not chunk.is_final:
-                chunks.append(chunk.content)
+                chunks.append(chunk.text)
         return "".join(chunks)
 
 
@@ -1259,20 +1277,29 @@ class FakeLLMAdapter:
         self._responses = responses or ["¿Qué pensás vos? ¿Cómo encarías el problema?"]
         self._call_count = 0
     
-    async def stream_chat(
+    async def stream(
         self,
-        system_prompt: str,
         messages: list[LLMMessage],
-        max_tokens: int = 300
+        *,
+        system: str | None = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
     ) -> AsyncIterator[LLMStreamChunk]:
         response = self._responses[self._call_count % len(self._responses)]
         self._call_count += 1
         
         for char in response:
-            yield LLMStreamChunk(content=char, is_final=False)
-        yield LLMStreamChunk(content="", is_final=True, tokens_used=len(response))
+            yield LLMStreamChunk(text=char, is_final=False)
+        yield LLMStreamChunk(text="", is_final=True, tokens_used=len(response))
     
-    async def complete(self, system_prompt: str, messages: list[LLMMessage], max_tokens: int = 300) -> str:
+    async def complete(
+        self,
+        messages: list[LLMMessage],
+        *,
+        system: str | None = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
+    ) -> str:
         response = self._responses[self._call_count % len(self._responses)]
         self._call_count += 1
         return response
@@ -1583,8 +1610,8 @@ class TutorService:
         else:
             # Streaming de la respuesta aprobada
             for char in approved_response:
-                yield {"type": "chunk", "content": char}
-            yield {"type": "done"}
+                yield {"type": "token", "text": char}
+            yield {"type": "complete"}
 ```
 
 ### Anti-patrón a Evitar
@@ -1598,7 +1625,7 @@ class TutorService:
             if "la solución es" in chunk.content:
                 yield {"type": "error", "content": "Bloqueado"}
                 return
-            yield {"type": "chunk", "content": chunk.content}
+            yield {"type": "token", "text": chunk.content}
 # Problema: no podés detectar patrones que se dividen en múltiples chunks
 
 # BIEN: Acumular respuesta completa y aplicar guards sobre el texto íntegro

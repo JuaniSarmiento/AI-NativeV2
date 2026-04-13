@@ -56,6 +56,9 @@ asyncpg = ">=0.29.0,<1.0"
 
 alembic = ">=1.13.0,<2.0"
 # Migraciones de schema. Soporta multi-schema PostgreSQL.
+# NOTA de drivers: la app usa asyncpg (postgresql+asyncpg://...) para runtime async.
+# Alembic usa un driver SÍNCRONO (psycopg2/psycopg) en alembic.ini para las migraciones.
+# Ambos coexisten: asyncpg en app, psycopg2-binary (dev dep) para alembic.
 
 # ──────────────────────────────────────────────────────────────
 # Validación y configuración
@@ -76,13 +79,14 @@ email-validator = ">=2.1.0,<3.0"
 # ──────────────────────────────────────────────────────────────
 python-jose = {version = ">=3.3.0,<4.0", extras = ["cryptography"]}
 # JWT encoding/decoding. [cryptography] habilita RS256 para el futuro.
+# CRÍTICO: siempre pasar algorithms=["HS256"] explícitamente en TODOS los decode() calls.
+# python-jose tiene CVE histórico con algoritmos "none" y RS256 si no se especifica algorithms.
+# NUNCA usar jose.decode(token, key) sin el argumento algorithms.
 
 bcrypt = ">=4.1.0,<5.0"
 # Hashing de contraseñas. Pure Python con C extension para performance.
 # NOTA: bcrypt 4.x dropó compatibilidad con versiones < 3.6 de Python.
-
-passlib = {version = ">=1.7.4,<2.0", extras = ["bcrypt"]}
-# Wrapper sobre bcrypt con mejor API. Opcional si se usa bcrypt directo.
+# Se usa bcrypt directamente (no via passlib) para evitar una dependencia extra.
 
 # ──────────────────────────────────────────────────────────────
 # Redis
@@ -145,6 +149,7 @@ dev = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"             # Todos los tests async automáticamente
+asyncio_default_fixture_loop_scope = "session"
 testpaths = ["tests"]
 addopts = "--cov=app --cov-report=term-missing --cov-fail-under=80"
 
@@ -176,7 +181,7 @@ ignore_missing_imports = true
 | `python-jose[cryptography]` | ≥3.3 | JWT tokens |
 | `bcrypt` | ≥4.1 | Hash de contraseñas |
 | `redis[hiredis]` | ≥5.0 | Cache, sesiones, rate limiting |
-| `anthropic` | ≥0.30 | SDK Anthropic Claude API |
+| `anthropic` | ≥0.30 | SDK Anthropic Claude API (claude-sonnet-4-20250514) |
 | `structlog` | ≥24.1 | Logging JSON estructurado |
 
 ### 1.3 Dependencias de testing
@@ -377,7 +382,6 @@ pip freeze > requirements.lock   # alternativa con pip
 
 # Instalar desde lockfile:
 uv sync --frozen                 # reproducible, no actualiza
-pip install -r requirements.lock
 ```
 
 ### 3.2 Frontend (Node)
@@ -467,7 +471,7 @@ npm audit fix --force            # fix breaking (revisar manualmente)
 
 | Paquete | CVE conocido histórico | Mitigación |
 |---------|----------------------|------------|
-| `python-jose` | Problemas con algoritmos none/RS256 | Usar solo HS256, verificar `algorithms=["HS256"]` explícitamente |
+| `python-jose` | Vulnerabilidad a algorithm confusion (none/RS256) si no se especifica `algorithms` | **OBLIGATORIO**: `algorithms=["HS256"]` en TODOS los `jwt.decode()`. Sin esto, un atacante puede firmar tokens con "none" y omitir verificación. |
 | `pydantic` v1 | DoS en regex recursivos | Usar Pydantic v2 (reescrito en Rust, no afectado) |
 | `fastapi` | N/A (framework joven, activo) | Mantener actualizado |
 | `anthropic` SDK | N/A | Mantener actualizado (acceso a nuevos modelos) |
@@ -546,4 +550,4 @@ ai-native-frontend
 **Referencias internas**:
 - `knowledge-base/04-infraestructura/01_configuracion.md` — variables de entorno y configuración
 - `knowledge-base/04-infraestructura/03_deploy.md` — Docker builds y CI/CD
-- `knowledge-base/05-dx/01_desarrollo_local.md` — setup del entorno de desarrollo
+- `knowledge-base/05-dx/01_onboarding.md` — setup del entorno de desarrollo
