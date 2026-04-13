@@ -521,13 +521,24 @@ Las Fases 1, 2 y 3 son módulos independientes dentro del mismo monolito. Sin em
 ### 7.2 Topología de Streams Redis
 
 ```
-Redis Stream                   Productor                 Consumer Group
-────────────────────────────────────────────────────────────────────────
-events:submissions             features/exercises         cognitive-group
-events:tutor                   features/tutor             cognitive-group
-events:code                    features/sandbox           cognitive-group
-events:cognitive               features/cognitive         analytics-group
+Redis Stream        Productores                                           Consumer Group
+──────────────────────────────────────────────────────────────────────────────────────────
+events:submissions  features/exercises (reads_problem)                    cognitive-group
+                    features/submissions (exercise.submitted)
+                    features/reflections (reflection.submitted)
+
+events:tutor        features/tutor (tutor.session.started,                cognitive-group
+                                    tutor.interaction.completed,
+                                    tutor.session.ended)
+
+events:code         features/sandbox (code.executed, code.execution.failed) cognitive-group
+                    features/submissions (code.snapshot.captured)
+
+events:cognitive    features/cognitive (cognitive.classified,             analytics-group
+                                        session.metrics.computed)
 ```
+
+> **Nota — eventos de gobernanza**: Los eventos `governance.flag.raised` y `governance.prompt_updated` **NO** se publican en Redis Streams. Son persistidos directamente en la tabla `governance.governance_events` por el Governance Layer. Son registros de auditoría en DB, no mensajes del bus.
 
 ### 7.3 Implementación del Event Bus
 
@@ -577,7 +588,7 @@ class EventBus:
         Publica un evento en un Redis Stream.
 
         Args:
-            event_type: Tipo del evento (ej: "submission.created")
+            event_type: Tipo del evento (ej: "exercise.submitted")
             payload: Datos del evento.
             stream: Stream destino (ej: EventBus.STREAM_SUBMISSIONS).
             source: Módulo origen ("exercises", "tutor", "cognitive").
@@ -614,7 +625,7 @@ class EventBus:
 
     async def publish_submission_created(self, event: "SubmissionCreatedEvent"):
         await self.publish(
-            event_type="submission.created",
+            event_type="exercise.submitted",
             payload=event.to_dict(),
             stream=self.STREAM_SUBMISSIONS,
             source="exercises",
@@ -623,7 +634,7 @@ class EventBus:
 
     async def publish_tutor_interaction(self, event: "TutorInteractionCompletedEvent"):
         await self.publish(
-            event_type="tutor.response_received",
+            event_type="tutor.interaction.completed",
             payload=event.to_dict(),
             stream=self.STREAM_TUTOR,
             source="tutor",
@@ -657,7 +668,7 @@ class EventOutbox(Base):
     event_type: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
-        comment="Tipo de evento canónico: submission.created, tutor.response_received, etc.",
+        comment="Tipo de evento canónico: exercise.submitted, tutor.interaction.completed, code.executed, etc.",
     )
     payload: Mapped[dict] = mapped_column(
         JSONB,
@@ -704,27 +715,24 @@ export type EventSource = "phase1" | "phase2" | "phase3" | "phase4";
 
 export type EventType =
   // Fase 1 — Ejercicios y Ejecución
+  | "reads_problem"
   | "code.snapshot.captured"
   | "code.executed"
   | "code.execution.failed"
   | "exercise.submitted"
-  | "exercise.graded"
-  | "test.passed"
-  | "test.failed"
+  | "reflection.submitted"
   // Fase 2 — Tutor IA
   | "tutor.session.started"
-  | "tutor.interaction.started"
   | "tutor.interaction.completed"
   | "tutor.session.ended"
-  | "tutor.hint.requested"
-  | "tutor.hint.provided"
   // Fase 3 — Clasificación Cognitiva
   | "cognitive.classified"
+  | "session.metrics.computed"
   | "ctr.entry.created"
   | "ctr.hash.verified"
-  // Fase 4 — Gobernanza
+  // Gobernanza (DB records, no bus events — ver nota en sección 7.2)
   | "governance.flag.raised"
-  | "governance.review.completed";
+  | "governance.prompt_updated";
 ```
 
 ---
@@ -904,10 +912,10 @@ class CognitiveEventConsumer:
         event_type = event.get("event_type")
 
         handlers = {
-            "code.run": self._handle_code_executed,
-            "code.snapshot": self._handle_snapshot,
-            "tutor.response_received": self._handle_tutor_interaction,
-            "submission.created": self._handle_submission,
+            "code.executed": self._handle_code_executed,
+            "code.snapshot.captured": self._handle_snapshot,
+            "tutor.interaction.completed": self._handle_tutor_interaction,
+            "exercise.submitted": self._handle_submission,
         }
 
         handler = handlers.get(event_type)
@@ -979,7 +987,7 @@ Content-Type: application/json
 }
 ```
 
-El backend procesa este request y publica el evento `code.snapshot` en el stream `events:code`.
+El backend procesa este request y publica el evento `code.snapshot.captured` en el stream `events:code`.
 
 ---
 
@@ -1014,51 +1022,72 @@ class N4Level(str, Enum):
 
 
 class CognitiveEventType(str, Enum):
-    # Indicadores de N1 — Comprensión
+    """
+    Tipos de eventos almacenados en cognitive_events (CTR).
+    Son los event_type canonicos que el Cognitive Trace Engine persiste en DB.
+    Distintos de los nombres del bus Redis — la Fase 3 los transforma al consumir.
+    """
+    SESSION_STARTED = "session.started"
     READS_PROBLEM = "reads_problem"
+    CODE_SNAPSHOT = "code.snapshot"
+    TUTOR_QUESTION_ASKED = "tutor.question_asked"
+    TUTOR_RESPONSE_RECEIVED = "tutor.response_received"
+    CODE_RUN = "code.run"
+    SUBMISSION_CREATED = "submission.created"
+    REFLECTION_SUBMITTED = "reflection.submitted"
+    SESSION_CLOSED = "session.closed"
+
+
+class CognitiveBehaviorIndicator(str, Enum):
+    """
+    Indicadores comportamentales inferidos por el clasificador N4.
+    NO se almacenan directamente como event_type en cognitive_events —
+    se derivan del análisis de patrones sobre el CTR.
+    """
+    # Indicadores de N1 — Comprensión
     ASKED_BASIC_CONCEPT = "asked_basic_concept"
     NO_PROGRESS_10MIN = "no_progress_10min"
     BLANK_CODE_START = "blank_code_start"
-    REFLECTION_SUBMITTED = "reflection.submitted"
 
     # Indicadores de N2 — Estrategia
     IDENTIFIED_CONCEPT = "identified_concept"
     ASKED_HOW_TO_APPLY = "asked_how_to_apply"
     SYNTAX_ERROR_RESOLVED_WITH_HINT = "syntax_error_resolved_with_hint"
-    SUBMISSION_CREATED = "submission.created"
 
     # Indicadores de N3 — Validación
-    CODE_RUN = "code.run"
     FIXED_LOGIC_ERROR_INDEPENDENTLY = "fixed_logic_error_independently"
     ASKED_OPTIMIZATION = "asked_optimization"
     TESTS_PASSING_WITH_SOME_HELP = "tests_passing_with_some_help"
 
     # Indicadores de N4 — Interacción con IA
-    TUTOR_QUESTION_ASKED = "tutor.question_asked"
-    TUTOR_RESPONSE_RECEIVED = "tutor.response_received"
     NO_TUTOR_INTERACTION_NEEDED = "no_tutor_interaction_needed"
     REQUESTED_FULL_SOLUTION = "requested_full_solution"  # señal negativa
 
 
-# Mapeo de tipo de evento a dimensión N4 que activa
+# Mapeo de evento almacenado a dimensión N4 que activa
 EVENT_TO_N4_HINT: dict[CognitiveEventType, N4Level] = {
     CognitiveEventType.READS_PROBLEM: N4Level.N1,
-    CognitiveEventType.ASKED_BASIC_CONCEPT: N4Level.N1,
-    CognitiveEventType.NO_PROGRESS_10MIN: N4Level.N1,
-    CognitiveEventType.BLANK_CODE_START: N4Level.N1,
     CognitiveEventType.REFLECTION_SUBMITTED: N4Level.N1,
-    CognitiveEventType.IDENTIFIED_CONCEPT: N4Level.N2,
-    CognitiveEventType.ASKED_HOW_TO_APPLY: N4Level.N2,
-    CognitiveEventType.SYNTAX_ERROR_RESOLVED_WITH_HINT: N4Level.N2,
+    CognitiveEventType.CODE_SNAPSHOT: N4Level.N2,
     CognitiveEventType.SUBMISSION_CREATED: N4Level.N2,
     CognitiveEventType.CODE_RUN: N4Level.N3,
-    CognitiveEventType.FIXED_LOGIC_ERROR_INDEPENDENTLY: N4Level.N3,
-    CognitiveEventType.ASKED_OPTIMIZATION: N4Level.N3,
-    CognitiveEventType.TESTS_PASSING_WITH_SOME_HELP: N4Level.N3,
     CognitiveEventType.TUTOR_QUESTION_ASKED: N4Level.N4,
     CognitiveEventType.TUTOR_RESPONSE_RECEIVED: N4Level.N4,
-    CognitiveEventType.NO_TUTOR_INTERACTION_NEEDED: N4Level.N4,
-    CognitiveEventType.REQUESTED_FULL_SOLUTION: N4Level.N4,
+}
+
+# Mapeo de indicador comportamental inferido a dimensión N4
+INDICATOR_TO_N4_HINT: dict[CognitiveBehaviorIndicator, N4Level] = {
+    CognitiveBehaviorIndicator.ASKED_BASIC_CONCEPT: N4Level.N1,
+    CognitiveBehaviorIndicator.NO_PROGRESS_10MIN: N4Level.N1,
+    CognitiveBehaviorIndicator.BLANK_CODE_START: N4Level.N1,
+    CognitiveBehaviorIndicator.IDENTIFIED_CONCEPT: N4Level.N2,
+    CognitiveBehaviorIndicator.ASKED_HOW_TO_APPLY: N4Level.N2,
+    CognitiveBehaviorIndicator.SYNTAX_ERROR_RESOLVED_WITH_HINT: N4Level.N2,
+    CognitiveBehaviorIndicator.FIXED_LOGIC_ERROR_INDEPENDENTLY: N4Level.N3,
+    CognitiveBehaviorIndicator.ASKED_OPTIMIZATION: N4Level.N3,
+    CognitiveBehaviorIndicator.TESTS_PASSING_WITH_SOME_HELP: N4Level.N3,
+    CognitiveBehaviorIndicator.NO_TUTOR_INTERACTION_NEEDED: N4Level.N4,
+    CognitiveBehaviorIndicator.REQUESTED_FULL_SOLUTION: N4Level.N4,
 }
 ```
 

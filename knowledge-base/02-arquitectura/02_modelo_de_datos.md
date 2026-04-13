@@ -101,15 +101,21 @@ Este schema almacena toda la lógica operacional de la plataforma: usuarios, cur
                          │ submitted_at    │
                          └──────┬──────────┘
                                 │ 1
-                                │ N
-                         ┌──────▼──────────────┐
-                         │   code_snapshots    │
-                         ├─────────────────────┤
-                         │ id (PK)             │
-                         │ submission_id (FK)  │
-                         │ code                │
-                         │ snapshot_at         │
-                         └─────────────────────┘
+                       ┌────────┴────────┐
+                       │ N               │ 0..1
+               ┌───────▼──────────┐  ┌──▼──────────────┐
+               │  code_snapshots  │  │   reflections   │
+               ├──────────────────┤  ├─────────────────┤
+               │ id (PK)          │  │ id (PK)         │
+               │ submission_id(FK)│  │submission_id(FK)│
+               │ code             │  │ student_id (FK) │
+               │ snapshot_at      │  │difficulty_percep│
+               └──────────────────┘  │strategy_descr.  │
+                                      │ai_usage_eval.   │
+                                      │what_would_change│
+                                      │confidence_level │
+                                      │ created_at      │
+                                      └─────────────────┘
 
 ┌──────────────┐         ┌───────────────────────┐
 │    users     │         │   tutor_interactions  │
@@ -296,6 +302,31 @@ Tabla de outbox para garantía at-least-once del Event Bus. Los eventos crítico
 | `status` | `ENUM('pending','processed','failed')` | NOT NULL, DEFAULT 'pending' | Estado del procesamiento |
 
 **Índices**: `ix_event_outbox_status_created` (compuesto `status, created_at` — para polling eficiente del worker).
+
+---
+
+### reflections (operational schema — Fase 2 extension)
+
+Reflexión post-submission del alumno. Una por submission (UNIQUE constraint).
+
+| Campo | Tipo | Constraints | Descripción |
+|-------|------|------------|-------------|
+| `id` | `UUID` | PK, DEFAULT gen_random_uuid() | Identificador único |
+| `submission_id` | `UUID` | FK → submissions(id), UNIQUE, NOT NULL | Submission asociada |
+| `student_id` | `UUID` | FK → users(id), NOT NULL | Alumno que reflexiona |
+| `difficulty_perception` | `SMALLINT` | NOT NULL, CHECK (1-5) | Percepción de dificultad |
+| `strategy_description` | `TEXT` | NOT NULL | Descripción de la estrategia seguida |
+| `ai_usage_evaluation` | `TEXT` | NOT NULL | Autoevaluación del uso de IA |
+| `what_would_change` | `TEXT` | NOT NULL | Qué cambiaría en retrospectiva |
+| `confidence_level` | `SMALLINT` | NOT NULL, CHECK (1-5) | Nivel de confianza en la solución |
+| `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT NOW() | Fecha de creación |
+
+**Constraints**: `uq_reflections_submission_id` UNIQUE (submission_id) — una reflexión por submission.  
+**Índices**: `ix_reflections_submission_id` (UNIQUE), `ix_reflections_student_id`.
+
+**Relaciones**:
+- 1:1 con `submissions` (una submission puede tener como máximo una reflexión post-entrega, opcional)
+- N:1 con `users` (muchas reflexiones pertenecen a un mismo alumno)
 
 ---
 

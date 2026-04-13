@@ -825,31 +825,31 @@ Si se supera el rate limit:
 
 ### Reflexiones
 
+> **Nota**: Las reflexiones son post-submission únicamente. Cada entrega puede tener una sola reflexión (constraint UNIQUE sobre `submission_id`). El flujo es: el alumno envía su entrega → recibe el `submission_id` → completa la reflexión vinculada a esa entrega.
+
 ---
 
-#### POST /api/v1/student/exercises/{exercise_id}/reflection
+#### POST /api/v1/submissions/{submission_id}/reflection
 
-El estudiante completa una reflexión guiada sobre el problema.
+El estudiante completa una reflexión post-entrega vinculada a una submission específica.
 
-**Auth requerida**: Bearer token (rol `alumno`)  
-**Rate limit**: 5 req/hora por ejercicio
+**Auth requerida**: Bearer token (rol `alumno`, debe ser owner de la submission)  
+**Rate limit**: 5 req/hora por usuario
 
 **Request Body**:
 ```json
 {
-  "reflection_type": "pre_solving",
   "responses": {
-    "what_do_you_understand": "El problema pide encontrar el elemento más grande...",
-    "what_is_your_strategy": "Voy a recorrer la lista comparando cada elemento...",
-    "what_difficulties_do_you_anticipate": "No sé cómo manejar la lista vacía..."
+    "what_worked": "Entendí que debía comparar dos elementos a la vez...",
+    "what_was_difficult": "Manejar la lista vacía me costó más de lo esperado...",
+    "what_would_you_do_differently": "Hubiera empezado escribiendo los casos de prueba primero..."
   }
 }
 ```
 
 | Campo | Tipo | Requerido | Descripción |
 |-------|------|-----------|-------------|
-| `reflection_type` | enum | Sí | `pre_solving`, `mid_solving`, `post_solving` |
-| `responses` | object | Sí | Respuestas del estudiante (keys varían por tipo) |
+| `responses` | object | Sí | Respuestas del estudiante sobre su proceso de resolución |
 
 **Response 201**:
 ```json
@@ -857,12 +857,49 @@ El estudiante completa una reflexión guiada sobre el problema.
   "status": "ok",
   "data": {
     "reflection_id": "uuid-...",
+    "submission_id": "uuid-...",
     "n1_score_preview": 72.5,
-    "feedback": "Tu comprensión inicial del problema es buena. Te sugiero que...",
-    "created_at": "2026-04-10T12:00:00Z"
+    "feedback": "Tu reflexión muestra buena capacidad de autocrítica. Identificaste correctamente...",
+    "created_at": "2026-04-10T12:45:00Z"
   }
 }
 ```
+
+**Errores posibles**:
+- `404 NOT_FOUND` → `SUBMISSION_NOT_FOUND`
+- `403 FORBIDDEN` → No es owner de la submission
+- `409 CONFLICT` → `REFLECTION_ALREADY_EXISTS` (ya existe una reflexión para esta submission)
+
+---
+
+#### GET /api/v1/submissions/{submission_id}/reflection
+
+Obtiene la reflexión de una submission.
+
+**Auth requerida**: Bearer token (alumno owner, docente del curso, o admin)  
+**Rate limit**: 30 req/min
+
+**Response 200**:
+```json
+{
+  "status": "ok",
+  "data": {
+    "reflection_id": "uuid-...",
+    "submission_id": "uuid-...",
+    "responses": {
+      "what_worked": "...",
+      "what_was_difficult": "...",
+      "what_would_you_do_differently": "..."
+    },
+    "n1_score_preview": 72.5,
+    "feedback": "...",
+    "created_at": "2026-04-10T12:45:00Z"
+  }
+}
+```
+
+**Errores posibles**:
+- `404 NOT_FOUND` → `REFLECTION_NOT_FOUND` o `SUBMISSION_NOT_FOUND`
 
 ---
 
@@ -988,115 +1025,15 @@ Elimina un system prompt (solo si no está activo).
 
 ## 6. Fase 3 — Cognitive y Evaluación
 
-### Sesiones Cognitivas
+### Sesiones Cognitivas y Eventos — Lifecycle Event-Driven
 
----
+> **Nota**: Las cognitive sessions y events se crean internamente por el Event Bus consumer de Fase 3.
+> No hay endpoints de mutación expuestos al frontend. El lifecycle es event-driven:
+> - Session se crea al llegar el primer evento (`reads_problem`)
+> - Session se cierra al llegar `exercise.submitted` o por inactividad (30min)
+> - Events se registran automáticamente desde los streams de Redis
 
-#### POST /api/v1/cognitive/sessions/start
-
-Inicia una sesión cognitiva para un ejercicio.
-
-**Auth requerida**: Bearer token (rol `alumno`)  
-**Rate limit**: 10 req/hora por usuario
-
-**Request Body**:
-```json
-{
-  "exercise_id": "uuid-..."
-}
-```
-
-**Response 201**:
-```json
-{
-  "status": "ok",
-  "data": {
-    "session_id": "uuid-...",
-    "exercise_id": "uuid-...",
-    "genesis_hash": "sha256:abc123...",
-    "started_at": "2026-04-10T12:00:00Z",
-    "status": "open"
-  }
-}
-```
-
-**Errores posibles**:
-- `409 CONFLICT` → `SESSION_ALREADY_OPEN` (ya hay una sesión abierta para ese ejercicio)
-
----
-
-#### POST /api/v1/cognitive/sessions/{session_id}/close
-
-Cierra una sesión cognitiva y calcula las métricas finales.
-
-**Auth requerida**: Bearer token (alumno owner)
-
-**Request Body**: No body.
-
-**Response 200**:
-```json
-{
-  "status": "ok",
-  "data": {
-    "session_id": "uuid-...",
-    "session_hash": "sha256:xyz...",
-    "n4_final_score": {
-      "n1_comprehension": 78.5,
-      "n2_strategy": 65.0,
-      "n3_validation": 82.0,
-      "n4_ai_interaction": 55.0,
-      "composite": 70.1
-    },
-    "total_events": 24,
-    "duration_minutes": 47,
-    "closed_at": "2026-04-10T12:47:00Z"
-  }
-}
-```
-
----
-
-### Eventos Cognitivos
-
----
-
-#### POST /api/v1/cognitive/events
-
-Registra un evento cognitivo en la cadena CTR.
-
-**Auth requerida**: Bearer token (rol `alumno`)  
-**Rate limit**: 60 req/min (alta frecuencia — autosave y snapshots son eventos)
-
-**Request Body**:
-```json
-{
-  "session_id": "uuid-...",
-  "event_type": "code.snapshot",
-  "payload": {
-    "code_hash": "sha256:def456...",
-    "test_cases_passed": 1,
-    "test_cases_total": 3
-  }
-}
-```
-
-**Response 201**:
-```json
-{
-  "status": "ok",
-  "data": {
-    "event_id": "uuid-...",
-    "sequence_number": 8,
-    "current_hash": "sha256:ghi789...",
-    "created_at": "2026-04-10T12:15:00Z"
-  }
-}
-```
-
-**Errores posibles**:
-- `404 NOT_FOUND` → `SESSION_NOT_FOUND`
-- `409 CONFLICT` → `SESSION_CLOSED` (la sesión ya fue cerrada)
-- `400 BAD_REQUEST` → `INVALID_EVENT_TYPE`
+Los endpoints a continuación son exclusivamente de **lectura** (GET), disponibles para el frontend y el docente.
 
 ---
 
@@ -1302,7 +1239,7 @@ Analiza los patrones cognitivos de todos los estudiantes en un ejercicio.
 | Código HTTP | Error Code | Descripción |
 |-------------|-----------|-------------|
 | 400 | `VALIDATION_ERROR` | Datos de entrada inválidos |
-| 400 | `INVALID_EVENT_TYPE` | Tipo de evento cognitivo desconocido |
+| 400 | `INVALID_EVENT_TYPE` | Tipo de evento cognitivo desconocido (interno, Event Bus) |
 | 401 | `UNAUTHORIZED` | No hay token o token inválido |
 | 401 | `INVALID_CREDENTIALS` | Email o contraseña incorrectos |
 | 401 | `REFRESH_TOKEN_EXPIRED` | El refresh token expiró |
@@ -1316,8 +1253,9 @@ Analiza los patrones cognitivos de todos los estudiantes en un ejercicio.
 | 408 | `EXECUTION_TIMEOUT` | El código excedió el tiempo límite |
 | 409 | `ALREADY_ENROLLED` | El estudiante ya está inscripto |
 | 409 | `EMAIL_ALREADY_EXISTS` | El email ya está registrado |
-| 409 | `SESSION_ALREADY_OPEN` | Ya hay una sesión abierta |
-| 409 | `SESSION_CLOSED` | La sesión ya fue cerrada |
+| 409 | `SESSION_ALREADY_OPEN` | Ya hay una sesión abierta (interno, Event Bus) |
+| 409 | `SESSION_CLOSED` | La sesión ya fue cerrada (interno, Event Bus) |
+| 409 | `REFLECTION_ALREADY_EXISTS` | Ya existe una reflexión para esta submission |
 | 409 | `CANNOT_DELETE_ACTIVE_PROMPT` | No se puede borrar el prompt activo |
 | 429 | `RATE_LIMIT_EXCEEDED` | Demasiadas peticiones |
 | 500 | `INTERNAL_ERROR` | Error interno del servidor |
@@ -1340,7 +1278,7 @@ Rate limiting implementado con Redis usando el algoritmo **Token Bucket** por us
 | `POST /student/exercises/{id}/run` | 30 req | 1 min | Por usuario |
 | `POST /student/exercises/{id}/submit` | 10 req | 1 min | Por usuario + ejercicio |
 | `WS /ws/tutor/chat` | 1 conexión activa | — | Por usuario |
-| `POST /cognitive/events` | 60 req | 1 min | Por usuario |
+| `POST /submissions/{id}/reflection` | 5 req | 1 hora | Por usuario |
 | `GET /teacher/exercises/{id}/patterns` | 5 req | 1 min | Por usuario |
 
 ### Headers de Rate Limit en Respuesta
