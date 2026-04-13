@@ -66,10 +66,18 @@ El motor que transforma el CTR en métricas útiles. Calcula scores N1-N4 por se
 - `total_interactions` (INTEGER, NOT NULL, DEFAULT 0)
 - `help_seeking_ratio` (NUMERIC(4,3), NULLABLE) — 0.000 a 1.000
 - `autonomy_index` (NUMERIC(4,3), NULLABLE) — 0.000 a 1.000
+- `qe_score` (NUMERIC(5,2), NULLABLE) — Score calidad epistémica agregado (0-100)
+- `qe_quality_prompt` (NUMERIC(5,2), NULLABLE)
+- `qe_critical_evaluation` (NUMERIC(5,2), NULLABLE)
+- `qe_integration` (NUMERIC(5,2), NULLABLE)
+- `qe_verification` (NUMERIC(5,2), NULLABLE)
+- `dependency_score` (NUMERIC(4,3), NULLABLE) — Ratio interacciones N4 "dependent" (0.0-1.0)
+- `reflection_score` (NUMERIC(5,2), NULLABLE) — Derivado de reflexión post-ejercicio (0-100)
+- `success_efficiency` (NUMERIC(5,2), NULLABLE) — score / (intentos + tiempo)
 - `risk_level` (ENUM: low/medium/high/critical, NULLABLE)
 - `computed_at` (TIMESTAMPTZ, NULLABLE)
 
-Nota: tipos son NUMERIC, no FLOAT. `evaluation_result` y `epistemic_quality` NO están en este modelo — la función E = f(N1,N2,N3,N4,Qe) se almacena en `cognitive_sessions.n4_final_score`.
+Nota: tipos son NUMERIC, no FLOAT. E = f(N1,N2,N3,N4,Qe) se almacena en `cognitive_sessions.n4_final_score` (JSONB), no aquí — la función E = f(N1,N2,N3,N4,Qe) se almacena en `cognitive_sessions.n4_final_score`.
 
 **reasoning_records** (INMUTABLE — sin UPDATE ni DELETE, son evidencia)
 - `id` (UUID PK)
@@ -77,7 +85,7 @@ Nota: tipos son NUMERIC, no FLOAT. `evaluation_result` y `epistemic_quality` NO 
 - `record_type` (ENUM: hypothesis/strategy/validation/reflection, NOT NULL)
 - `details` (JSONB, NOT NULL)
 - `previous_hash` (VARCHAR 64, NOT NULL) — hash chain
-- `current_hash` (VARCHAR 64, NOT NULL) — SHA-256 de este registro
+- `event_hash` (VARCHAR 64, NOT NULL) — SHA-256 de este registro
 - `created_at` (TIMESTAMPTZ, NOT NULL)
 
 ## Dependencias
@@ -90,7 +98,7 @@ Nota: tipos son NUMERIC, no FLOAT. `evaluation_result` y `epistemic_quality` NO 
 - [ ] Cognitive Worker: calcular N1-N4 scores (NUMERIC 0-100) basados en rúbrica
 - [ ] Cognitive Worker: help_seeking_ratio, autonomy_index (NUMERIC 0.000-1.000), risk_level
 - [ ] Evaluation Engine: E = f(N1, N2, N3, N4, Qe) con pesos configurables — resultado JSONB en cognitive_sessions.n4_final_score
-- [ ] reasoning_records: inmutabilidad con hash chain (previous_hash → current_hash)
+- [ ] reasoning_records: inmutabilidad con hash chain (previous_hash → event_hash)
 - [ ] Endpoints: métricas por sesión, dashboard docente, perfil alumno, progreso alumno
 - [ ] Queries de agregación por comisión usando `cognitive_sessions.commission_id` (campo denormalizado — no JOIN cross-schema)
 - [ ] Frontend docente: dashboard de comisión (promedios, distribución, filtros)

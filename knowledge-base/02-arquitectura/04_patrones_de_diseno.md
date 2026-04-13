@@ -357,7 +357,7 @@ El Domain Service contiene la lógica de negocio de un dominio. Es delgado respe
 1. **Separación de concerns**: El router valida la request, el service ejecuta la lógica, el repo persiste.
 2. **Reusabilidad**: El mismo service puede ser llamado desde un HTTP endpoint, un WebSocket handler, o un job background.
 3. **Testabilidad**: Los services se testean con mocks de repositorios sin levantar FastAPI.
-4. **Excepciones de dominio**: El service lanza `DomainException`, el router las convierte en HTTP.
+4. **Excepciones de dominio**: El service lanza `DomainError`, el router las convierte en HTTP.
 
 ### Implementación
 
@@ -367,7 +367,7 @@ El Domain Service contiene la lógica de negocio de un dominio. Es delgado respe
 # backend/app/core/exceptions.py
 from uuid import UUID
 
-class DomainException(Exception):
+class DomainError(Exception):
     """Excepción base del dominio. NO es una HTTPException."""
     
     def __init__(self, message: str, code: str):
@@ -375,21 +375,21 @@ class DomainException(Exception):
         self.message = message
         self.code = code
 
-class NotFoundException(DomainException):
+class NotFoundException(DomainError):
     def __init__(self, resource: str, id: UUID):
         super().__init__(
             message=f"El recurso '{resource}' con id '{id}' no existe.",
             code=f"{resource.upper()}_NOT_FOUND"
         )
 
-class NotEnrolledException(DomainException):
+class NotEnrolledException(DomainError):
     def __init__(self, student_id: UUID, exercise_id: UUID):
         super().__init__(
             message=f"El estudiante '{student_id}' no está inscripto en el curso del ejercicio '{exercise_id}'.",
             code="NOT_ENROLLED"
         )
 
-class SessionAlreadyOpenException(DomainException):
+class SessionAlreadyOpenException(DomainError):
     def __init__(self, student_id: UUID, exercise_id: UUID):
         super().__init__(
             message=f"Ya existe una sesión abierta para el estudiante '{student_id}' en el ejercicio '{exercise_id}'.",
@@ -470,15 +470,15 @@ class CognitiveService:
         """
         Registra un evento en la cadena CTR.
         Lanza NotFoundException si la sesión no existe.
-        Lanza DomainException si la sesión está cerrada.
+        Lanza DomainError si la sesión está cerrada.
         """
         session = await self.uow.cognitive.get_session(session_id)
         if not session:
             raise NotFoundException("cognitive_session", session_id)
         
         if session.status != "open":
-            from app.core.exceptions import DomainException
-            raise DomainException(
+            from app.core.exceptions import DomainError
+            raise DomainError(
                 message="No se pueden registrar eventos en una sesión cerrada.",
                 code="SESSION_CLOSED"
             )
@@ -502,7 +502,7 @@ class CognitiveService:
             sequence_number=sequence,
             payload=payload,
             previous_hash=last_hash,
-            current_hash=new_hash,
+            event_hash=new_hash,
             created_at=created_at
         )
         
@@ -512,7 +512,7 @@ class CognitiveService:
         return CognitiveEventDTO(
             event_id=saved.id,
             sequence_number=sequence,
-            current_hash=new_hash,
+            event_hash=new_hash,
             created_at=created_at
         )
 ```
@@ -522,7 +522,7 @@ class CognitiveService:
 ```python
 # backend/app/features/cognitive/router.py
 from fastapi import APIRouter, Depends, HTTPException, status
-from app.core.exceptions import DomainException, NotFoundException, SessionAlreadyOpenException
+from app.core.exceptions import DomainError, NotFoundException, SessionAlreadyOpenException
 
 router = APIRouter()
 
@@ -549,7 +549,7 @@ async def start_cognitive_session(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": e.code, "message": e.message}
         )
-    except DomainException as e:
+    except DomainError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": e.code, "message": e.message}
@@ -886,11 +886,11 @@ class HashChainService:
             )
             
             # El hash almacenado debe coincidir con el recalculado
-            if recomputed != event["current_hash"]:
+            if recomputed != event["event_hash"]:
                 return False, event["sequence_number"]
             
             # El siguiente evento debe apuntar al hash actual
-            expected_previous = event["current_hash"]
+            expected_previous = event["event_hash"]
         
         return True, None
     
@@ -920,17 +920,17 @@ Evento 1: session.started
   event_type: "session.started"
   payload: {}
   created_at: 2026-04-10T12:00:01
-  current_hash: sha256("aaa111...:session.started:{}:2026-04-10T12:00:01") = "bbb222..."
+  event_hash: sha256("aaa111...:session.started:{}:2026-04-10T12:00:01") = "bbb222..."
 
 Evento 2: tutor.question_asked
   previous_hash: "bbb222..."
   event_type: "tutor.question_asked"
   payload: {"question": "¿Cómo empiezo?"}
   created_at: 2026-04-10T12:02:30
-  current_hash: sha256("bbb222...:tutor.question_asked:{...}:...") = "ccc333..."
+  event_hash: sha256("bbb222...:tutor.question_asked:{...}:...") = "ccc333..."
 
 Si alguien modifica el payload del Evento 1:
-  El current_hash recalculado del Evento 1 será "xxx999..." ≠ "bbb222..."
+  El event_hash recalculado del Evento 1 será "xxx999..." ≠ "bbb222..."
   El previous_hash del Evento 2 ("bbb222...") ya no coincide con el hash del Evento 1
   → CHAIN INTEGRITY: COMPROMISED at sequence 1
 ```

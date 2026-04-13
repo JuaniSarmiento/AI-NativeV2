@@ -386,12 +386,15 @@ await redis.xadd(
 
 ```python
 # PATRÓN: Auth manual en WebSocket
-@router.websocket("/ws/tutor/{session_id}")
-async def tutor_websocket(websocket: WebSocket, session_id: UUID, token: str = Query(...)):
-    await websocket.accept()
+@router.websocket("/ws/tutor/chat")
+async def tutor_websocket(websocket: WebSocket, token: str = Query(...)):
+    # Auth ANTES de accept() — ver 03-seguridad/01_modelo_de_seguridad.md
     try:
-        user = await authenticate_ws_token(token)
-    except AuthenticationError:
+        user = decode_token(token)
+        if await is_blacklisted(user["jti"]):
+            await websocket.close(code=4001, reason="Token invalidado")
+            return
+    except (JWTError, ExpiredSignatureError):
         await websocket.close(code=4001)
         return
     

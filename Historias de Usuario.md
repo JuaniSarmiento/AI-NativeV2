@@ -81,7 +81,7 @@ Ninguna. Es la primera historia.
 - [ ] `docker compose up` levanta exitosamente los servicios: `api` (puerto 8000), `db` (PostgreSQL 16, puerto 5432), `redis` (Redis 7, puerto 6379), `frontend` (Vite, puerto 5173).
 - [ ] El servicio `api` usa hot reload: al cambiar un archivo `.py` en `/backend`, el servidor se reinicia automáticamente sin reconstruir el contenedor.
 - [ ] El servicio `frontend` usa HMR (Hot Module Replacement): al cambiar un archivo `.tsx`, el browser se actualiza sin recargar.
-- [ ] Las variables de entorno se cargan desde un archivo `.env` local (no commiteado). Existe un `.env.example` con todas las variables necesarias y valores de ejemplo.
+- [ ] Las variables de entorno se cargan desde un archivo `.env` local (no commiteado). Existe un `env.example` con todas las variables necesarias y valores de ejemplo.
 - [ ] Existe un `Makefile` o `justfile` con comandos `make up`, `make down`, `make logs`, `make shell-api`, `make shell-db`.
 - [ ] `GET http://localhost:8000/api/v1/health` retorna `{"status": "ok"}`.
 - [ ] `GET http://localhost:5173` carga la aplicación React.
@@ -376,7 +376,7 @@ Ninguna directamente. Es infraestructura de calidad.
 #### Criterios de Aceptación
 
 - [ ] `POST /api/v1/exercises/{id}/submissions` (rol alumno) crea una submission en estado `draft`.
-- [ ] `POST /api/v1/exercises/{id}/run` ejecuta el código actual del alumno en el sandbox y retorna stdout, stderr, runtime_ms, y los resultados de los test cases (pass/fail por caso).
+- [ ] `POST /api/v1/student/exercises/{id}/run` ejecuta el código actual del alumno en el sandbox y retorna stdout, stderr, runtime_ms, y los resultados de los test cases (pass/fail por caso).
 - [ ] `POST /api/v1/submissions/{id}/submit` cambia el estado de `draft` a `submitted`. No se puede deshacer.
 - [ ] Un alumno solo puede tener 1 submission en estado `draft` por ejercicio a la vez.
 - [ ] Si el alumno intenta hacer submit sin haber ejecutado el código al menos una vez, el sistema lo permite (no es obligatorio ejecutar antes de enviar).
@@ -863,7 +863,7 @@ Ninguna directamente. Es infraestructura de calidad.
 
 - [ ] El `CognitiveEventClassifier` recibe eventos del Event Bus (Redis Stream `events:cognitive`) y los clasifica.
 - [ ] El mapeo canónico `event_type → N4 level` es: `reads_problem → N1`, `asks_clarification → N1`, `reformulates_problem → N1`, `defines_strategy → N2`, `changes_strategy → N2`, `asks_hint → N2`, `runs_test → N3`, `interprets_error → N3`, `fixes_error → N3`, `asks_explanation → N4`, `audits_ai_suggestion → N4`.
-- [ ] Cada `cognitive_event` se persiste con: `session_id`, `event_type`, `n4_level`, `payload` (JSONB con contexto), `sequence_number`, `timestamp`.
+- [ ] Cada `cognitive_event` se persiste con: `session_id`, `event_type`, `payload` (JSONB con contexto), `sequence_number`, `previous_hash`, `event_hash`, `created_at`. Nota: n4_level NO es campo de cognitive_events — el nivel N4 se infiere del event_type según el mapeo canónico.
 - [ ] El `sequence_number` es monotónico por sesión y nunca se reutiliza.
 - [ ] El clasificador valida que el `payload` tenga los campos mínimos requeridos por `event_type` (según RN-3).
 - [ ] Si el payload es inválido, el evento se persiste con flag `is_valid: false` pero NO se descarta (para auditoría).
@@ -1168,7 +1168,7 @@ Ninguna directamente. Es infraestructura de calidad.
 - [ ] La ruta `/exercises/{id}` muestra el layout de 3 paneles: izquierda (enunciado en markdown renderizado), centro (Monaco Editor configurado para Python), derecha (chat tutor + panel de output).
 - [ ] El Monaco Editor tiene: syntax highlighting de Python, autocompletado básico, atajos de teclado estándar, cargado con el `starter_code` del ejercicio.
 - [ ] El panel derecho alterna entre "Chat Tutor" y "Output" con tabs.
-- [ ] El botón "Ejecutar" envía el código al sandbox (`POST /api/v1/exercises/{id}/run`) y muestra el output en el panel.
+- [ ] El botón "Ejecutar" envía el código al sandbox (`POST /api/v1/student/exercises/{id}/run`) y muestra el output en el panel.
 - [ ] El output muestra: stdout, stderr (en rojo), resultados de test cases (✓/✗ por caso), runtime en ms.
 - [ ] El botón "Enviar" hace submit de la submission y lanza el panel de reflexión.
 - [ ] El botón "Guardar" guarda un snapshot manual.

@@ -529,11 +529,12 @@ def set_memory_limit():
         (128 * 1024 * 1024, 128 * 1024 * 1024)
     )
 
-process = subprocess.Popen(
-    ["python3", "-c", sanitized_code],
-    stdout=subprocess.PIPE,
-    stderr=subprocess.PIPE,
-    stdin=subprocess.PIPE,
+# En runtime async, usar asyncio.create_subprocess_exec (NUNCA subprocess.Popen síncrono)
+process = await asyncio.create_subprocess_exec(
+    "python3", "-c", sanitized_code,
+    stdout=asyncio.subprocess.PIPE,
+    stderr=asyncio.subprocess.PIPE,
+    stdin=asyncio.subprocess.PIPE,
     preexec_fn=set_memory_limit,
     # Sin acceso a red (configurado a nivel de Docker network en producción)
 )
@@ -728,7 +729,7 @@ Sin separación explícita, en un monolito típico todos los modelos vivirían e
 ```sql
 CREATE SCHEMA IF NOT EXISTS operational;  -- Fases 0, 1 y 2: users, exercises, submissions, tutor_interactions, event_outbox
 CREATE SCHEMA IF NOT EXISTS cognitive;    -- Fase 3 ÚNICAMENTE: cognitive_sessions, cognitive_events, cognitive_metrics
-CREATE SCHEMA IF NOT EXISTS governance;   -- Fase 3: governance_events, tutor_system_prompts (versionados)
+CREATE SCHEMA IF NOT EXISTS governance;   -- Fase 2 escribe governance_events, Admin gestiona tutor_system_prompts, Fase 3 audita
 CREATE SCHEMA IF NOT EXISTS analytics;    -- Fase 3: aggregated_metrics, learning_analytics
 ```
 
@@ -740,7 +741,7 @@ CREATE SCHEMA IF NOT EXISTS analytics;    -- Fase 3: aggregated_metrics, learnin
 |--------|-----------------|---------------------|
 | `operational` | Fases 0, 1 y 2 | Fase 3 (submissions y tutor_interactions para contexto CTR) |
 | `cognitive` | Fase 3 ÚNICAMENTE | Fase 3 misma (analytics de progreso); docentes ven métricas agregadas vía API, nunca CTR raw |
-| `governance` | Fase 3 | Docentes y admins (vía endpoints de reportes) |
+| `governance` | Fase 2 (governance_events) + Admin (tutor_system_prompts) | Fase 3 (auditoría), Tutor (lee prompt activo via REST) |
 | `analytics` | Fase 3 | Todos (datos agregados y anonimizados) |
 
 **Alembic multi-schema:**

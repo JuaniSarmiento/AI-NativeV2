@@ -6,7 +6,7 @@
 
 Después de enviar una submission, el alumno completa un formulario de reflexión guiado. Esto captura metacognición explícita: qué fue difícil, qué estrategia usó, cómo evaluó su uso de la IA, qué haría diferente. La reflexión se persiste en schema `operational` (owner: Fase 2) y se emite como evento para que Fase 3 lo incorpore al CTR.
 
-**Decisión de diseño**: La reflexión se persiste en una tabla separada `reflections`, NO como campo en `submissions`. Razones: (1) mantiene `submissions` limpia y enfocada en el producto de código, (2) las reflexiones son independientemente queryables para análisis cognitivo, (3) son opcionales en tiempo (el alumno puede reflexionar después de hacer submit). Esta tabla es una extensión de Fase 2 al schema `operational` — **no está en el modelo de datos original del KB**, fue diseñada durante la planificación de EPICs como tabla explícita.
+**Decisión de diseño**: La reflexión se persiste en una tabla separada `reflections`, NO como campo en `submissions`. Razones: (1) mantiene `submissions` limpia y enfocada en el producto de código, (2) las reflexiones son independientemente queryables para análisis cognitivo, (3) son opcionales en tiempo (el alumno puede reflexionar después de hacer submit). La tabla `reflections` está documentada en el modelo canónico de KB (`02-arquitectura/02_modelo_de_datos.md`).
 
 ## Alcance
 
@@ -49,7 +49,7 @@ Después de enviar una submission, el alumno completa un formulario de reflexió
 ### Modelos (owner — schema: operational)
 - `operational.reflections`: id (UUID PK), submission_id (FK → submissions, UNIQUE), student_id (FK → users), difficulty_perception (INT CHECK (difficulty_perception BETWEEN 1 AND 5)), strategy_description (TEXT), ai_usage_evaluation (TEXT), what_would_change (TEXT), confidence_level (INT CHECK (confidence_level BETWEEN 1 AND 5)), created_at (TIMESTAMPTZ)
 
-  **Nota**: Esta tabla es una extensión de Fase 2 al schema `operational`. No estaba en el modelo de datos original del KB — fue diseñada durante la planificación de EPICs como tabla separada para mantener submissions limpio y reflexiones independientemente queryables. Fase 3 consume esta tabla via REST, nunca con queries directos.
+  **Nota**: Tabla documentada en KB (`02-arquitectura/02_modelo_de_datos.md`). Fase 3 consume via REST, nunca queries directos.
 
 ## Dependencias
 - **Blocked by**: EPIC-03 (auth protege los endpoints de reflexión), EPIC-08 (necesita submissions)

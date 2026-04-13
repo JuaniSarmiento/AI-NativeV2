@@ -367,9 +367,9 @@ Un atacante intenta firmar su propio JWT con un secret incorrecto.
 
 ### 5.2 IDOR (Insecure Direct Object Reference)
 
-#### A5.4 — Alumno accede a sesión de otro alumno
+#### A5.4 — Alumno accede a traza cognitiva de otro alumno
 ```
-GET /api/v1/tutor/sessions/otro-alumno-uuid
+GET /api/v1/teacher/sessions/otro-alumno-session-uuid/trace
 ```
 
 **Mitigación**: verificación explícita de ownership en cada endpoint sensible:
@@ -576,7 +576,7 @@ def validate_chain(events: list[dict]) -> tuple[bool, int | None]:
             timestamp=datetime.fromisoformat(event["timestamp"]),
             payload=event["payload"],
         )
-        if expected_hash != event["hash"]:
+        if expected_hash != event["event_hash"]:
             return False, i
     return True, None
 ```
@@ -648,7 +648,7 @@ La CSP del backend restringe qué puede ejecutar el browser:
 |------|-----------|------------|
 | Historial de conversaciones con el tutor | `operational.tutor_interactions` | Solo visible por el propio alumno, docente de su comisión (read-only), admin |
 | CTR events (registro de errores, tiempos de respuesta) | `cognitive.cognitive_events` | Solo visible por el propio alumno y admin |
-| Métricas de aprendizaje individual | `analytics.student_metrics` | Solo visible por el alumno y docente a cargo |
+| Métricas cognitivas individuales | `cognitive.cognitive_metrics` | Solo visible por el alumno (propias) y docente a cargo (su comisión) |
 | Email del estudiante | `operational.users` | No expuesto en endpoints públicos |
 
 ### 9.3 Datos no sensibles (operacionales)

@@ -109,7 +109,7 @@ Al finalizar (enviar submission), el alumno debe completar un formulario de refl
 
 El código del alumno se guarda automáticamente cada 30 segundos y ante cada ejecución.
 
-- **Enforcement**: Frontend emite `POST /code_snapshots` periódicamente. Backend registra con `edit_distance_from_previous` para análisis de evolución del código
+- **Enforcement**: Frontend emite `POST /code_snapshots` periódicamente. Backend registra snapshots; la distancia de edición se calcula on-the-fly cuando se necesita para análisis de evolución
 - **Impacto**: Permite reconstruir la evolución del código como parte del CTR
 
 ## Reglas de Gobernanza (empate3)

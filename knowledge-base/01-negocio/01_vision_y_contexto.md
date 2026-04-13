@@ -74,6 +74,8 @@ El CTR no es un log técnico — es un artefacto interpretativo que contiene:
 
 Salvaguarda contra performatividad: un estudiante que dice lo que el tutor quiere oír sin comprender. El sistema computa un indicador cruzado: cada afirmación conceptual del estudiante en el diálogo socrático debe encontrar correlato en una modificación coherente del código dentro de la misma ventana temporal, y viceversa. **El diálogo, por sí solo, no constituye evidencia suficiente.**
 
+> **Nota de implementación**: Este indicador es **post-MVP**. Los datos necesarios para calcularlo (code_snapshots con timestamps + tutor_interactions con timestamps) se capturan en v1, lo que permite construir el indicador en una iteración futura sin cambios de schema.
+
 ## Contexto Institucional
 
 - **Institución**: Universidad Tecnológica Nacional — Facultad Regional Mendoza

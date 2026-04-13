@@ -250,20 +250,18 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 | Recurso / Acción | alumno | docente | admin |
 |------------------|--------|---------|-------|
-| `POST /tutor/session` | Propias | — | Todas |
-| `GET /tutor/session/{id}` | Propias | Alumnos de su comisión (read-only) | Todas |
-| `GET /tutor/history` | Propio | Alumnos de su comisión (read-only) | Todos |
-| `POST /exercises` | — | Si es del curso | Todas |
-| `GET /exercises` | Del curso | Del curso | Todas |
-| `GET /submissions/{id}` | Propias | Alumnos de su comisión (read-only) | Todas |
-| `GET /analytics/student/{id}` | Propio | Alumnos de su comisión | Todos |
-| `GET /analytics/course/{id}` | — | Su curso | Todas |
-| `GET /ctr/chain/{session_id}` | Propia | Alumnos de su comisión (read-only) | Todas |
-| `POST /admin/users` | — | — | Si |
-| `DELETE /admin/users/{id}` | — | — | Si |
+| `WS /ws/tutor/chat` | Propias (rate limited) | — | — |
+| `GET /teacher/tutor/interactions` | — | Alumnos de su comisión (read-only) | Todos |
+| `POST /courses/{id}/exercises` | — | Si es owner del curso | Todas |
+| `GET /courses/{id}/exercises` | Si inscripto | Del curso | Todas |
+| `POST /student/exercises/{id}/submit` | Propias | — | — |
+| `GET /student/submissions/{id}` | Propias | Alumnos de su comisión (read-only) | Todas |
+| `GET /teacher/students/{id}/profile` | Propio | Alumnos de su comisión | Todos |
+| `GET /teacher/courses/{id}/dashboard` | — | Su curso | Todas |
+| `GET /teacher/sessions/{id}/trace` | — | Alumnos de su comisión (read-only) | Todas |
 | `POST /admin/users/{id}/role` | — | — | Si |
-| `GET /admin/system` | — | — | Si |
-| `GET /health` | Si | Si | Si |
+| `GET /admin/tutor/system-prompts` | — | — | Si |
+| `GET /api/v1/health` | Si | Si | Si |
 
 ### 6.3 Implementación: Dependency en FastAPI
 
@@ -446,11 +444,11 @@ class SlidingWindowRateLimiter:
 
 | Endpoint | Clave Redis | Límite | Ventana | Justificación |
 |----------|-------------|--------|---------|---------------|
-| `POST /tutor/message` | `rl:tutor:{user_id}:{exercise_id}` | 30 | 3600s (1h) | Controla costo de API Anthropic, límite por ejercicio |
+| `WS /ws/tutor/chat` (por msg) | `rl:tutor:{user_id}:{exercise_id}` | 30 | 3600s (1h) | Controla costo de API Anthropic, límite por ejercicio |
 | `POST /api/v1/*` | `rl:api:{ip}` | 100 | 60s | Previene flooding general |
 | `POST /auth/login` | `rl:login:{ip}` | 10 | 300s (5min) | Previene brute force |
 | `POST /auth/register` | `rl:register:{ip}` | 5 | 3600s | Previene creación masiva de cuentas |
-| `POST /code/execute` | `rl:sandbox:{user_id}` | 20 | 60s | Controla recursos del sandbox |
+| `POST /student/exercises/{id}/run` | `rl:sandbox:{user_id}` | 30 | 60s | Controla recursos del sandbox |
 
 ### 8.3 Dependency de FastAPI para rate limiting
 

@@ -13,7 +13,7 @@ Los ejercicios son el núcleo de la interacción alumno-plataforma. Cada ejercic
 - Repository con filtros avanzados (por comisión, dificultad, topic, búsqueda)
 - Domain service: `ExerciseService`
 - Endpoints REST:
-  - `GET/POST /api/v1/commissions/{id}/exercises` (docente crea, alumno lista)
+  - `GET/POST /api/v1/courses/{id}/exercises` (docente crea, alumno lista)
   - `GET/PUT/DELETE /api/v1/exercises/{id}` (docente gestiona, alumno ve detalle)
   - `GET /api/v1/student/exercises` (alumno — ejercicios de mis comisiones con filtros)
 - Al responder `GET /api/v1/exercises/{id}` para un alumno autenticado, el backend emite el evento `reads_problem` al Event Bus
@@ -31,15 +31,15 @@ Los ejercicios son el núcleo de la interacción alumno-plataforma. Cada ejercic
 - Endpoints REST de ejercicios
 - Modelo `exercises` en schema `operational`
 - Datos de ejercicio que EPIC-07 (sandbox) y EPIC-08 (submissions) consumen
-- Evento: `reads_problem` (stream: `events:submissions`) — emitido cuando un alumno abre el detalle de un ejercicio. Payload: `{ student_id, exercise_id, commission_id, timestamp }`
+- Evento: `reads_problem` (stream: `events:submissions`) — emitido cuando un alumno abre el detalle de un ejercicio. Payload: `{ student_id, exercise_id, course_id, timestamp }`
 
 ### Consume
-- Comisiones (de EPIC-05) — los ejercicios pertenecen a comisiones, NO a cursos directamente
+- Cursos (de EPIC-05) — los ejercicios pertenecen a cursos (course_id FK). Las comisiones son el contexto de enrollment, no de ownership de ejercicios
 - Auth y RBAC (de EPIC-03)
 - DB patterns (de EPIC-02)
 
 ### Modelos (owner — schema: operational)
-- `exercises`: id (UUID PK), commission_id (FK → commissions.id, NOT NULL), title (VARCHAR 255), description (TEXT), test_cases (JSONB) -- Estructura completa:
+- `exercises`: id (UUID PK), course_id (FK → courses.id, NOT NULL), title (VARCHAR 255), description (TEXT), test_cases (JSONB) -- Estructura completa:
   ```json
   {
     "language": "python",
@@ -59,16 +59,16 @@ Los ejercicios son el núcleo de la interacción alumno-plataforma. Cada ejercic
   ```, difficulty (ENUM: easy/medium/hard), topic_tags (TEXT[], NOT NULL, DEFAULT '{}'), language (VARCHAR 50, default 'python'), starter_code (TEXT, default ''), max_attempts (SMALLINT, default 10), time_limit_minutes (SMALLINT, default 60), order_index (SMALLINT, default 0), is_active (BOOL), created_at, updated_at
 
 ## Dependencias
-- **Blocked by**: EPIC-05 (ejercicios pertenecen a comisiones)
-- **Blocks**: EPIC-07 (sandbox ejecuta código de ejercicios), EPIC-08 (submissions referencian ejercicios)
+- **Blocked by**: EPIC-05 (ejercicios pertenecen a cursos)
+- **Blocks**: EPIC-07 (sandbox ejecuta código de ejercicios), EPIC-08 (submissions referencian ejercicios), EPIC-09 (tutor necesita contexto del ejercicio)
 
 ## Stories
 
-- [ ] Modelo SQLAlchemy: exercises con commission_id FK, topic_tags TEXT[], campos completos + migración Alembic
+- [ ] Modelo SQLAlchemy: exercises con course_id FK, topic_tags TEXT[], campos completos + migración Alembic
 - [ ] Índice GIN sobre `topic_tags` para búsqueda eficiente
 - [ ] ExerciseRepository con filtros (comisión, dificultad, topic, búsqueda full-text)
 - [ ] ExerciseService con validación de negocio
-- [ ] Endpoints REST: CRUD ejercicios bajo `/api/v1/commissions/{id}/exercises` (docente) + listado/detalle (alumno)
+- [ ] Endpoints REST: CRUD ejercicios bajo `/api/v1/courses/{id}/exercises` (docente) + listado/detalle (alumno)
 - [ ] Emisión del evento `reads_problem` al Event Bus cuando alumno accede al detalle de un ejercicio
 - [ ] Validación de schema JSONB para test_cases
 - [ ] Frontend docente: ABM ejercicios (markdown editor, test cases builder, starter code)

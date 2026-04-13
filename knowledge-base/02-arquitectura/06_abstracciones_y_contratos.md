@@ -138,8 +138,8 @@ Cada tabla en PostgreSQL pertenece a exactamente un módulo. Solo ese módulo pu
 |-------------------|--------------------------------------------|---------------------------|
 | `operational`     | features/auth, courses, exercises, sandbox, tutor (Fases 0-2) | features/cognitive (via REST) |
 | `cognitive`       | features/cognitive, evaluation (Fase 3 únicamente) | features/governance (via REST) |
-| `governance`      | features/governance (Fase 3)               | features/tutor (lee prompt activo via REST) |
-| `analytics`       | features/evaluation, governance (Fase 3)   | Docentes via API endpoints |
+| `governance`      | features/governance (Fase 2: escribe governance_events) + Admin (gestiona prompts) | features/tutor (lee prompt activo via REST), features/cognitive/evaluation (audita via REST) |
+| `analytics`       | features/evaluation (Fase 3)               | Docentes via API endpoints |
 
 ### 3.2 Enforcement en Código
 

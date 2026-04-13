@@ -17,7 +17,7 @@
 | Fase 1 — Ejercicios | No iniciada | Comienza semana 3 |
 | Fase 2 — Tutor | No iniciada | Comienza semana 3 |
 | Fase 3 — CTR | No iniciada | Comienza semana 3 |
-| Fase 4 — Evaluación | No iniciada | Comienza semana 3 |
+| Fase 4 — Frontend | No iniciada | Comienza semana 3 |
 | Integración | No iniciada | Semanas 13-14 |
 | QA / Piloto | No iniciada | Semanas 15-16 |
 | Test Coverage | N/A | Objetivo: 80%+ |
@@ -115,7 +115,7 @@
 
 ---
 
-### Fase 4 — Evaluación Cognitiva N4
+### Fase 4 — Frontend Completo
 
 **Estado general**: No iniciada
 **Semanas asignadas**: 3-12

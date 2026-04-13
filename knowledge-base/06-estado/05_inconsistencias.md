@@ -20,7 +20,9 @@ El log se puebla principalmente por:
 
 **El proyecto está en etapa de inicio.** No hay inconsistencias detectadas porque aún no existe código de implementación. Este log se activa a partir de la semana 3 cuando comienza el desarrollo de las fases.
 
-> **Auditoría de documentación**: 2026-04-12 — Se realizó una revisión completa de los archivos de knowledge-base (05-dx, 06-estado, 07-anexos) contra las decisiones canónicas del proyecto. Las inconsistencias encontradas fueron resueltas directamente en los archivos afectados. No quedan inconsistencias abiertas en la documentación. Los cambios principales incluyeron: corrección de timeout del sandbox (5s → 10s), JWT access token expire (30min → 15min), estructura backend (flat → feature-based), features frontend canónicas, WS auth (solo query param), `useShallow` en ejemplos Zustand, modelo Anthropic (`claude-sonnet-4-20250514`), descripción de `infra/` (Docker Compose, no Kubernetes/Terraform), y adición de `openspec/` y `scaffold-decisions.yaml` a la estructura del monorepo.
+> **Auditoría parcial 2026-04-12**: Revisión de 05-dx, 06-estado, 07-anexos contra decisiones canónicas. Corrigió timeout sandbox (5s→10s), JWT expire (30min→15min), estructura backend, modelo Anthropic, etc. **Sin embargo, esta auditoría no cubrió cross-folder ni las carpetas 01-04, dejando 50+ inconsistencias sin detectar.**
+>
+> **Auditoría completa 2026-04-13**: Lectura exhaustiva de los 34 archivos de las 7 carpetas + comparación cross-folder. Se encontraron y resolvieron 50+ inconsistencias incluyendo: exercises FK (commission→course), 3 catálogos de event_type incompatibles, campos de reflexión divergentes, DomainException→DomainError, hash_chain.py path, cognitive_metrics campos faltantes, Fase 4 naming, governance ownership, WS endpoint variants, env vars naming, healthcheck paths, y más. Detalle completo en `_resumen/00_cross_folder.md`.
 
 ---
 
@@ -84,23 +86,34 @@ Ejemplos:
 
 ## Registro de Inconsistencias
 
-*Vacío — el proyecto aún no tiene implementación.*
+### Auditoría completa 2026-04-13
+
+Se realizó una auditoría exhaustiva de las 7 carpetas del knowledge-base, leyendo cada archivo y comparando datos entre documentos. Se encontraron y resolvieron **40+ inconsistencias** agrupadas en:
+
+- **01-negocio** (7 issues): FK exercises (commission→course), conteo backlog, cognitive_metrics incompleto, reflexión event_type, session_id en tutor_interactions, indicador cruzado post-MVP
+- **02-arquitectura** (15 issues): exercises FK en modelo de datos y API, 3 catálogos de event_type incompatibles, reflexión campos divergentes, cognitive session lifecycle, DomainException→DomainError, event_hash vs current_hash, risk_assessments FK, cognitive_metrics campos faltantes
+- **03-seguridad** (4 issues): rate limiting algoritmo (Token Bucket→Sliding Window), endpoint names en RBAC matrix, sandbox endpoint name/limits
+- **04-infraestructura** (10 issues): schema analytics con tablas fantasma, exercises FK, tutor_interactions FK cross-schema, cognitive_events user_id extra, cognitive_metrics incompleto, governance_events y tutor_system_prompts simplificados, tablas faltantes (reflections, event_outbox, reasoning_records)
+- **05-dx** (2 issues): hash_chain.py ubicación (core→features/cognitive)
+- **07-anexos** (3 issues): hash_chain.py ubicación y campo hash→event_hash en glosario y estructura
+
+Todos los fixes fueron aplicados directamente en los archivos afectados. Los resúmenes consolidados están en `knowledge-base/_resumen/`.
 
 ### Failures Abiertos
 
-*Ninguno.*
+*Ninguno tras auditoría 2026-04-13.*
 
 ---
 
 ### Warnings Abiertos
 
-*Ninguno.*
+*Ninguno tras auditoría 2026-04-13.*
 
 ---
 
 ### Resueltos / Cerrados
 
-*Ninguno.*
+Ver auditoría 2026-04-13 arriba — 40+ items resueltos.
 
 ---
 

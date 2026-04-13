@@ -524,7 +524,7 @@ Baja de un estudiante (soft delete, `is_active = false`).
 
 ---
 
-#### GET /api/v1/commissions/{commission_id}/exercises
+#### GET /api/v1/courses/{course_id}/exercises
 
 Lista ejercicios de una comisión.
 
@@ -535,7 +535,7 @@ Lista ejercicios de una comisión.
 
 ---
 
-#### POST /api/v1/commissions/{commission_id}/exercises
+#### POST /api/v1/courses/{course_id}/exercises
 
 Crea un ejercicio para la comisión.
 
@@ -839,17 +839,21 @@ El estudiante completa una reflexión post-entrega vinculada a una submission es
 **Request Body**:
 ```json
 {
-  "responses": {
-    "what_worked": "Entendí que debía comparar dos elementos a la vez...",
-    "what_was_difficult": "Manejar la lista vacía me costó más de lo esperado...",
-    "what_would_you_do_differently": "Hubiera empezado escribiendo los casos de prueba primero..."
-  }
+  "difficulty_perception": 4,
+  "strategy_description": "Primero pensé en usar un loop para comparar elementos...",
+  "ai_usage_evaluation": "Usé el tutor cuando no entendía los edge cases, pero intenté resolver por mi cuenta primero.",
+  "what_would_change": "Hubiera empezado escribiendo los casos de prueba primero.",
+  "confidence_level": 3
 }
 ```
 
 | Campo | Tipo | Requerido | Descripción |
 |-------|------|-----------|-------------|
-| `responses` | object | Sí | Respuestas del estudiante sobre su proceso de resolución |
+| `difficulty_perception` | integer (1-5) | Sí | Percepción de dificultad del ejercicio |
+| `strategy_description` | string | Sí | Descripción de la estrategia utilizada |
+| `ai_usage_evaluation` | string | Sí | Autoevaluación del uso de la IA |
+| `what_would_change` | string | Sí | Qué haría diferente en retrospectiva |
+| `confidence_level` | integer (1-5) | Sí | Nivel de confianza en la solución |
 
 **Response 201**:
 ```json
@@ -886,13 +890,11 @@ Obtiene la reflexión de una submission.
   "data": {
     "reflection_id": "uuid-...",
     "submission_id": "uuid-...",
-    "responses": {
-      "what_worked": "...",
-      "what_was_difficult": "...",
-      "what_would_you_do_differently": "..."
-    },
-    "n1_score_preview": 72.5,
-    "feedback": "...",
+    "difficulty_perception": 4,
+    "strategy_description": "...",
+    "ai_usage_evaluation": "...",
+    "what_would_change": "...",
+    "confidence_level": 3,
     "created_at": "2026-04-10T12:45:00Z"
   }
 }
@@ -1027,11 +1029,11 @@ Elimina un system prompt (solo si no está activo).
 
 ### Sesiones Cognitivas y Eventos — Lifecycle Event-Driven
 
-> **Nota**: Las cognitive sessions y events se crean internamente por el Event Bus consumer de Fase 3.
-> No hay endpoints de mutación expuestos al frontend. El lifecycle es event-driven:
-> - Session se crea al llegar el primer evento (`reads_problem`)
-> - Session se cierra al llegar `exercise.submitted` o por inactividad (30min)
-> - Events se registran automáticamente desde los streams de Redis
+> **Nota sobre lifecycle de cognitive sessions**:
+> - **Mecanismo primario**: El frontend inicia la sesión explícitamente al abrir un ejercicio (via `CognitiveService.start_session()`). Esto genera el genesis_hash y devuelve el session_id al frontend.
+> - **Mecanismo fallback**: Si llega un evento al Event Bus sin sesión activa, el consumer de Fase 3 puede crearla automáticamente.
+> - Session se cierra al llegar `exercise.submitted` o por inactividad (30min).
+> - Events se registran automáticamente desde los streams de Redis.
 
 Los endpoints a continuación son exclusivamente de **lectura** (GET), disponibles para el frontend y el docente.
 
@@ -1166,14 +1168,14 @@ Obtiene la traza completa CTR de una sesión cognitiva.
         "sequence_number": 1,
         "event_type": "session.started",
         "payload": {},
-        "current_hash": "sha256:111...",
+        "event_hash": "sha256:111...",
         "created_at": "2026-04-10T12:00:00Z"
       },
       {
         "sequence_number": 2,
         "event_type": "tutor.question_asked",
         "payload": { "question": "¿Cómo empiezo?", "inferred_n4_level": 4 },
-        "current_hash": "sha256:222...",
+        "event_hash": "sha256:222...",
         "created_at": "2026-04-10T12:02:30Z"
       }
     ],
@@ -1267,7 +1269,7 @@ Analiza los patrones cognitivos de todos los estudiantes en un ejercicio.
 
 ### Estrategia
 
-Rate limiting implementado con Redis usando el algoritmo **Token Bucket** por usuario o por IP.
+Rate limiting implementado con Redis usando el algoritmo **Sliding Window** (ZSET) por usuario o por IP. Más justo que fixed window y más eficiente que sliding window log.
 
 ### Límites por Endpoint
 

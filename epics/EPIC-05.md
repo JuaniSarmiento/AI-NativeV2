@@ -46,7 +46,7 @@ Módulo fundacional del dominio académico. Los cursos y comisiones son la estru
 
 ## Dependencias
 - **Blocked by**: EPIC-01, EPIC-02, EPIC-03, EPIC-04
-- **Blocks**: EPIC-06 (ejercicios pertenecen a comisiones)
+- **Blocks**: EPIC-06 (ejercicios pertenecen a cursos, comisiones proveen contexto de enrollment)
 
 ## Stories
 

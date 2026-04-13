@@ -20,7 +20,7 @@ ai-native-platform/
 ├── scaffold-decisions.yaml         # Fuente de verdad del scaffold
 ├── docker-compose.yml              # Servicios de infraestructura local
 ├── docker-compose.override.yml     # Overrides para desarrollo
-├── .env.example                    # Template de variables de entorno
+├── env.example                    # Template de variables de entorno
 ├── .pre-commit-config.yaml         # Configuración de pre-commit hooks
 ├── Makefile                        # Comandos de conveniencia
 └── .github/
@@ -45,7 +45,7 @@ backend/
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── security.py             # JWT encode/decode, password hashing
-│   │   ├── hash_chain.py           # Algoritmo de hash chain para CTRs (100% coverage)
+│   │   ├── event_bus.py             # Event Bus basado en Redis Streams
 │   │   ├── exceptions.py           # Excepciones de dominio (ExerciseNotFoundError, etc.)
 │   │   └── logging.py              # Configuración de structlog
 │   ├── features/
@@ -67,14 +67,15 @@ backend/
 │   │   │   ├── service.py          # subprocess con timeout 10s, 128MB RAM, sin red
 │   │   │   └── schemas.py
 │   │   ├── tutor/                  # Fase 2 — Orchestrator, guardrails, chat WS
-│   │   │   ├── router.py           # WebSocket /ws/tutor/{session_id}
+│   │   │   ├── router.py           # WebSocket /ws/tutor/chat?token=<jwt> (exercise_id en init msg)
 │   │   │   ├── service.py          # Sesiones de tutor, integración con Anthropic
 │   │   │   ├── guardrails.py       # Pre/post processing para anti-solver
 │   │   │   ├── prompt_builder.py   # Construcción de prompts socrátivos
 │   │   │   └── schemas.py
 │   │   ├── cognitive/              # Fase 3 — Event classifier, CTR builder, metrics
 │   │   │   ├── router.py           # /api/v1/sessions/{id}/ctr/*
-│   │   │   ├── service.py          # Creación y consulta de CTRs, hash chain
+│   │   │   ├── service.py          # Creación y consulta de CTRs
+│   │   │   ├── hash_chain.py       # HashChainService: SHA-256 chain para CTR (100% coverage)
 │   │   │   ├── repository.py       # Solo create + read (no update, no delete)
 │   │   │   ├── models.py           # CognitiveEvent — schema: cognitive (sin is_active)
 │   │   │   └── schemas.py
@@ -136,8 +137,8 @@ El punto de entrada de la aplicación FastAPI. Crea la instancia de `FastAPI`, r
 **`app/core/config.py`**
 Define `Settings(BaseSettings)` que carga todas las variables de entorno usando Pydantic Settings. Incluye validadores para valores críticos (SECRET_KEY no puede ser "CHANGE_ME" en producción). Se instancia como un singleton `settings = Settings()`.
 
-**`app/core/hash_chain.py`**
-Implementa `compute_ctr_hash(content: dict, previous_hash: str | None) -> str` y `verify_chain_integrity(records: list[CognitiveEvent]) -> bool`. La serialización usa `json.dumps(sort_keys=True)` para determinismo garantizado.
+**`app/features/cognitive/hash_chain.py`**
+Implementa `HashChainService` con métodos `compute_genesis_hash()`, `compute_event_hash()` y `verify_chain()`. La serialización usa `json.dumps(sort_keys=True, separators=(",",":"))` para determinismo garantizado. Columnas en DB: `event_hash` y `previous_hash`.
 
 **`app/db/session.py`**
 Crea el `async_engine` usando `create_async_engine` con `asyncpg` como driver. Define `AsyncSessionFactory = async_sessionmaker(engine, expire_on_commit=False)`. Expone `get_db()` como FastAPI dependency que yield una sesión y la cierra al finalizar el request.
@@ -274,7 +275,7 @@ frontend/
 
 **`src/shared/api/client.ts`**
 Instancia de Axios configurada con:
-- `baseURL: import.meta.env.VITE_API_BASE_URL`
+- `baseURL: \`${import.meta.env.VITE_API_URL}/api/v1\``
 - Interceptor de request: agrega `Authorization: Bearer {token}` desde el authStore
 - Interceptor de response: en error 401, intenta refresh del token; si falla, logout
 - Interceptor de response: convierte snake_case a camelCase automáticamente (axios-case-converter)

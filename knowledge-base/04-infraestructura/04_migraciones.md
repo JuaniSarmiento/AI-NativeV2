@@ -25,10 +25,10 @@ La plataforma usa **4 schemas** en PostgreSQL para separar responsabilidades y f
 
 | Schema | Propósito | Tablas principales |
 |--------|-----------|-------------------|
-| `operational` | Cursos, ejercicios, usuarios, submissions, interacciones con el tutor | `users`, `courses`, `commissions`, `enrollments`, `exercises`, `submissions`, `tutor_interactions` |
-| `cognitive` | Sesiones cognitivas, CTR events, métricas | `cognitive_sessions`, `cognitive_events`, `cognitive_metrics` |
+| `operational` | Cursos, ejercicios, usuarios, submissions, interacciones con el tutor, reflexiones | `users`, `courses`, `commissions`, `enrollments`, `exercises`, `submissions`, `code_snapshots`, `tutor_interactions`, `reflections`, `event_outbox` |
+| `cognitive` | Sesiones cognitivas, CTR events, métricas, razonamiento | `cognitive_sessions`, `cognitive_events`, `cognitive_metrics`, `reasoning_records` |
 | `governance` | Auditoría, versionado de prompts, eventos de política | `governance_events`, `tutor_system_prompts` |
-| `analytics` | Métricas de aprendizaje y ejercicios | `student_metrics`, `exercise_attempts`, `course_stats`, `risk_assessments` |
+| `analytics` | Evaluación de riesgo por alumno | `risk_assessments` |
 
 **Por qué múltiples schemas**:
 - Separación de responsabilidades clara a nivel de DB
@@ -40,33 +40,30 @@ La plataforma usa **4 schemas** en PostgreSQL para separar responsabilidades y f
 
 ```
 ainative (database)
-├── operational (schema)
-│   ├── users             id, email, password_hash (VARCHAR 128), role, is_active, created_at
-│   ├── courses           id, name, description, created_by (FK users), created_at
-│   ├── commissions       id, course_id (FK), name, year, is_active
-│   ├── enrollments       id, student_id (FK users), commission_id (FK), enrolled_at
-│   ├── exercises         id, commission_id (FK), title, description, starter_code, created_by
-│   ├── submissions       id, student_id (FK users), exercise_id (FK), code, status, created_at
-│   └── tutor_interactions    id, session_id (FK cognitive.cognitive_sessions), role (user/assistant),
-│                             content, n4_level, tokens_used, model_version, prompt_hash (SHA-256), created_at
+├── operational (schema) — Owner: Fases 0, 1, 2
+│   ├── users                 id(UUID), email, password_hash(VARCHAR 128), full_name, role(ENUM), is_active, created_at, updated_at
+│   ├── courses               id, name, description, topic_taxonomy(JSONB), is_active, created_at, updated_at
+│   ├── commissions           id, course_id(FK→courses), teacher_id(FK→users), name, year, semester(CHECK 1|2), is_active, created_at, updated_at
+│   ├── enrollments           id, student_id(FK→users), commission_id(FK→commissions), enrolled_at, is_active
+│   ├── exercises             id, course_id(FK→courses), title, description, test_cases(JSONB), difficulty(ENUM), topic_tags(TEXT[]), language, starter_code, max_attempts, time_limit_minutes, order_index, is_active, created_at, updated_at
+│   ├── submissions           id, student_id(FK→users), exercise_id(FK), code, status(ENUM), score(NUMERIC), feedback, test_results(JSONB), stdout, stderr, attempt_number, submitted_at, evaluated_at
+│   ├── code_snapshots        id, student_id, exercise_id, submission_id(FK nullable), code, snapshot_at  ← INMUTABLE
+│   ├── reflections           id, submission_id(FK UNIQUE), student_id(FK), difficulty_perception(1-5), strategy_description, ai_usage_evaluation, what_would_change, confidence_level(1-5), created_at
+│   ├── tutor_interactions    id, session_id(correlación lógica, sin FK cross-schema), student_id(FK→users), exercise_id(FK), role(ENUM user/assistant), content, n4_level(SMALLINT), tokens_used, model_version, prompt_hash(VARCHAR 64), created_at  ← INMUTABLE
+│   └── event_outbox          id, event_type, payload(JSONB), status(ENUM pending/processed/failed), processed_at, retry_count, created_at
 │
-├── cognitive (schema)
-│   ├── cognitive_sessions    id, student_id (FK), exercise_id (FK), started_at, ended_at, status
-│   ├── cognitive_events      id, session_id (FK), sequence_num, event_type, payload (JSONB),
-│   │                         previous_hash, event_hash (SHA-256), timestamp, user_id  ← INMUTABLE
-│   └── cognitive_metrics     id, session_id (FK), n1_comprehension_score, n2_strategy_score, n3_validation_score, n4_ai_interaction_score, total_interactions, help_seeking_ratio, autonomy_index, risk_level
+├── cognitive (schema) — Owner: Fase 3 ÚNICAMENTE
+│   ├── cognitive_sessions    id, student_id, exercise_id, started_at, closed_at, genesis_hash(VARCHAR 64), session_hash(VARCHAR 64), n4_final_score(JSONB), status(ENUM open/closed/invalidated)
+│   ├── cognitive_events      id, session_id(FK), event_type(VARCHAR 100), sequence_number, payload(JSONB), previous_hash(VARCHAR 64), event_hash(VARCHAR 64), created_at  ← INMUTABLE, solo INSERT
+│   ├── cognitive_metrics     id, session_id(FK UNIQUE), n1-n4 scores(NUMERIC), qe_score, qe_quality_prompt, qe_critical_evaluation, qe_integration, qe_verification, dependency_score, reflection_score, success_efficiency, total_interactions, help_seeking_ratio, autonomy_index, risk_level(ENUM), computed_at
+│   └── reasoning_records     id, session_id(FK), record_type(ENUM), details(JSONB), previous_hash, event_hash, created_at  ← INMUTABLE
 │
-├── governance (schema)
-│   ├── governance_events     id, event_type, actor_id, description, payload (JSONB), created_at
-│   └── tutor_system_prompts  id, version_hash (SHA-256), content, created_at, is_active
+├── governance (schema) — Owner: Fase 2 (escribe governance_events) + Admin (gestiona prompts), Fase 3 audita
+│   ├── governance_events     id, event_type(VARCHAR 100), actor_id, target_type, target_id, details(JSONB), created_at  ← INMUTABLE
+│   └── tutor_system_prompts  id, name, content(TEXT), sha256_hash(VARCHAR 64), version(semver), is_active(BOOLEAN), guardrails_config(JSONB), created_by, created_at, updated_at
 │
-└── analytics (schema)
-    ├── exercise_attempts  id, user_id (FK), exercise_id (FK), session_id (FK), code_submitted,
-    │                      passed, error_type, attempt_num, time_spent_ms, created_at
-    ├── student_metrics    user_id (PK), total_sessions, total_messages,
-    │                      avg_attempts_per_exercise, last_active, updated_at
-    ├── course_stats       course_id (PK), total_students, avg_completion_rate, updated_at
-    └── risk_assessments   id, student_id (FK), session_id (FK), risk_level, indicators, created_at
+└── analytics (schema) — Owner: Fase 3
+    └── risk_assessments      id, student_id, commission_id, risk_level(ENUM), risk_factors(JSONB), recommendation, triggered_by(ENUM), assessed_at, acknowledged_by, acknowledged_at
 ```
 
 ---
@@ -473,50 +470,30 @@ def upgrade() -> None:
     )
 
     # ──────────────────────────────────────────
-    # Schema: analytics
+    # Schema: analytics (solo risk_assessments — las métricas agregadas están en cognitive.cognitive_metrics)
     # ──────────────────────────────────────────
     op.create_table(
-        "exercise_attempts",
+        "risk_assessments",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("operational.users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("exercise_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("session_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("cognitive.cognitive_sessions.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("code_submitted", sa.Text(), nullable=True),
-        sa.Column("passed", sa.Boolean(), nullable=False),
-        sa.Column("error_type", sa.String(100), nullable=True),
-        sa.Column("attempt_num", sa.Integer(), nullable=False),
-        sa.Column("time_spent_ms", sa.Integer(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()")),
+        sa.Column("student_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("commission_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("risk_level", sa.Enum("low", "medium", "high", "critical", name="risk_level_enum", schema="analytics"), nullable=False),
+        sa.Column("risk_factors", postgresql.JSONB(), nullable=False),
+        sa.Column("recommendation", sa.Text(), nullable=True),
+        sa.Column("triggered_by", sa.Enum("automatic", "manual", "threshold", name="triggered_by_enum", schema="analytics"), nullable=False),
+        sa.Column("assessed_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()"), nullable=False),
+        sa.Column("acknowledged_by", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column("acknowledged_at", sa.DateTime(timezone=True), nullable=True),
         schema="analytics",
     )
-    op.create_index("ix_analytics_attempts_user_exercise", "exercise_attempts", ["user_id", "exercise_id"], schema="analytics")
-
-    op.create_table(
-        "student_metrics",
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("operational.users.id", ondelete="CASCADE"), primary_key=True),
-        sa.Column("total_sessions", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("total_messages", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("avg_attempts_per_exercise", sa.Float(), nullable=True),
-        sa.Column("last_active", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()")),
-        schema="analytics",
-    )
-
-    op.create_table(
-        "course_stats",
-        sa.Column("course_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("operational.courses.id", ondelete="CASCADE"), primary_key=True),
-        sa.Column("total_students", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("avg_completion_rate", sa.Float(), nullable=True),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()")),
-        schema="analytics",
-    )
+    op.create_index("ix_risk_assessments_student_id", "risk_assessments", ["student_id"], schema="analytics")
+    op.create_index("ix_risk_assessments_commission_id", "risk_assessments", ["commission_id"], schema="analytics")
+    op.create_index("ix_risk_assessments_risk_level", "risk_assessments", ["risk_level"], schema="analytics")
 
 
 def downgrade() -> None:
     # Eliminar en orden inverso (FK constraints)
-    op.drop_table("course_stats", schema="analytics")
-    op.drop_table("student_metrics", schema="analytics")
-    op.drop_table("exercise_attempts", schema="analytics")
+    op.drop_table("risk_assessments", schema="analytics")
     op.drop_table("governance_events", schema="governance")
     op.drop_table("tutor_system_prompts", schema="governance")
     op.drop_table("cognitive_events", schema="cognitive")
@@ -641,7 +618,7 @@ Alembic genera IDs aleatorios (hash corto). Renombrarlos opcionalmente con núme
 
 | Objeto | Convención | Ejemplo |
 |--------|-----------|---------|
-| Tablas | `snake_case`, plural | `exercise_attempts` |
+| Tablas | `snake_case`, plural | `cognitive_events` |
 | Columnas | `snake_case` | `password_hash` |
 | Índices | `ix_{schema}_{tabla}_{columnas}` | `ix_operational_users_email` |
 | FKs | `fk_{tabla}_{columna}_{ref_tabla}` | `fk_sessions_user_id_accounts` |
@@ -708,14 +685,14 @@ def upgrade():
 
 ```python
 # Bloquea la tabla durante la creación — NO usar en producción con datos
-op.create_index("ix_cognitive_events_user_id", "cognitive_events", ["user_id"], schema="cognitive")
+op.create_index("ix_cognitive_events_session_sequence", "cognitive_events", ["session_id", "sequence_number"], schema="cognitive")
 
 # En producción usar CONCURRENTLY (no bloquea la tabla):
 def upgrade():
-    op.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_cognitive_events_user_id ON cognitive.cognitive_events (user_id)")
+    op.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_cognitive_events_session_sequence ON cognitive.cognitive_events (session_id, sequence_number)")
 
 def downgrade():
-    op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_cognitive_events_user_id")
+    op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_cognitive_events_session_sequence")
 ```
 
 ### P6: Olvidar revisar el SQL generado

@@ -43,7 +43,7 @@ Sistema de autenticación y autorización que protege toda la plataforma. JWT co
 
 ### Modelos (owner)
 - `operational.users` (ya creado en EPIC-02, acá se usa)
-- Redis keys: `token:blacklist:{jti}` con TTL = tiempo restante del token
+- Redis keys: `auth:blacklist:{jti}` con TTL = tiempo restante del token
 
 ## Dependencias
 - **Blocked by**: EPIC-01, EPIC-02 (necesita users + Redis)

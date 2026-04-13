@@ -19,9 +19,9 @@
 
 ## 1. Variables de Entorno — Backend
 
-El archivo `.env` en la raíz del proyecto (ignorado por git) contiene todas las variables de configuración. El archivo `.env.example` (incluido en el repo) documenta las variables requeridas sin valores reales.
+El archivo `.env` en la raíz del proyecto (ignorado por git) contiene todas las variables de configuración. El archivo `env.example` (incluido en el repo) documenta las variables requeridas sin valores reales.
 
-### 1.1 Variables completas (`backend/.env.example`)
+### 1.1 Variables completas (`backend/env.example`)
 
 ```bash
 # ============================================================
@@ -257,13 +257,13 @@ anthropic_client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
 Vite expone variables de entorno al código del cliente mediante el prefijo `VITE_`. Las variables sin ese prefijo son accesibles solo durante el build y no se exponen en el bundle.
 
-### 3.1 Archivo `frontend/.env.example`
+### 3.1 Archivo `frontend/env.example`
 
 ```bash
 # ============================================================
 # API
 # ============================================================
-VITE_API_URL=http://localhost:8000/api/v1
+VITE_API_URL=http://localhost:8000
 # URL base de la API REST del backend
 # En producción: https://api.tu-dominio.com/api/v1
 
@@ -299,7 +299,7 @@ VITE_ENABLE_DEVTOOLS=true
 ```typescript
 // src/config/env.ts
 const config = {
-  apiUrl: import.meta.env.VITE_API_URL ?? "http://localhost:8000/api/v1",
+  apiUrl: `${import.meta.env.VITE_API_URL ?? "http://localhost:8000"}/api/v1`,
   wsUrl: import.meta.env.VITE_WS_URL ?? "ws://localhost:8000",
   appName: import.meta.env.VITE_APP_NAME ?? "AI-Native",
   enableMockApi: import.meta.env.VITE_ENABLE_MOCK_API === "true",
@@ -414,7 +414,7 @@ services:
     env_file:
       - ./frontend/.env
     environment:
-      - VITE_API_URL=http://localhost:8000/api/v1
+      - VITE_API_URL=http://localhost:8000
       - VITE_WS_URL=ws://localhost:8000
     depends_on:
       - api
@@ -458,7 +458,7 @@ Los health checks en Docker Compose garantizan el orden correcto de startup:
 | HTTPS | No | Sí (Nginx + Let's Encrypt o certificado propio) |
 | Logging | `pretty` (human-readable) | `json` (estructurado para Loki/Grafana) |
 | Workers | 1 | `2 * CPU + 1` (gunicorn con workers uvicorn) |
-| Monitoring | No | Structured logs + /health endpoint |
+| Monitoring | No | Structured logs + /api/v1/health endpoint |
 
 ### 5.2 Variables que DEBEN cambiar en producción
 
@@ -588,7 +588,7 @@ Thumbs.db
 
 | Archivo | Razón |
 |---------|-------|
-| `.env.example` | Documenta variables requeridas sin valores reales |
+| `env.example` | Documenta variables requeridas sin valores reales |
 | `alembic/versions/*.py` | Historial de migraciones — parte del código |
 | `docker-compose.yml` | Configuración del entorno de desarrollo |
 | `pyproject.toml` | Dependencias y configuración del proyecto Python |

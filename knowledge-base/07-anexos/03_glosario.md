@@ -115,7 +115,7 @@ Donde:
 - `0.6 - 0.8`: Proceso sólido, predominantemente N2-N3
 - `0.8 - 1.0`: Proceso excelente, presencia significativa de N3-N4
 
-**En el código**: Calculada por `scoring_service.compute_qe()`. Los valores se almacenan en `analytics.session_metrics`.
+**En el código**: Calculada por el Cognitive Worker en Fase 3. Los valores se almacenan en `cognitive.cognitive_metrics` (campos: qe_score, qe_quality_prompt, qe_critical_evaluation, qe_integration, qe_verification).
 
 ---
 
@@ -123,18 +123,16 @@ Donde:
 
 **Definición**: Registro atómico e inmutable de un evento cognitivo significativo ocurrido durante una sesión de aprendizaje. Es la unidad fundamental del sistema de trazabilidad cognitiva.
 
-**Estructura de un CTR**:
+**Estructura de un evento CTR** (tabla `cognitive.cognitive_events`):
 ```json
 {
   "id": "uuid",
-  "session_id": "uuid",
-  "user_id": "uuid",
+  "session_id": "uuid (FK → cognitive_sessions)",
   "event_type": "session.started | reads_problem | code.snapshot | tutor.question_asked | tutor.response_received | code.run | submission.created | reflection.submitted | session.closed",
-  "content": { /* contenido variable según event_type */ },
-  "cognitive_signal": "N1 | N2 | N3 | N4 | NEUTRAL",
-  "ai_involvement": "none | requested | provided | critical | dependent",
-  "hash": "sha256_del_contenido_y_hash_anterior",
-  "previous_hash": "sha256_del_ctr_anterior | null",
+  "sequence_number": 1,
+  "payload": { /* contenido variable según event_type */ },
+  "previous_hash": "sha256_del_evento_anterior | genesis_hash",
+  "event_hash": "SHA256(previous_hash + event_type + serialize(payload) + created_at)",
   "created_at": "ISO8601_UTC"
 }
 ```
@@ -228,7 +226,7 @@ Donde:
 | `duracion_sesion_minutos` | Tiempo total de la sesión | Integer |
 | `eventos_por_minuto` | Densidad de actividad cognitiva | Float |
 
-**En el código**: Calculadas por `scoring_service.py` y almacenadas en `analytics.session_metrics`.
+**En el código**: Calculadas por el Cognitive Worker en Fase 3 y almacenadas en `cognitive.cognitive_metrics`.
 
 ---
 
@@ -296,7 +294,7 @@ Si se modifica el contenido de `CTR_2`, su hash cambia, lo que hace que el hash 
 
 **Requisito de determinismo**: La serialización del contenido para el cálculo del hash debe ser determinista. Se usa `json.dumps(content, sort_keys=True)` para garantizar que el mismo objeto Python siempre produce el mismo JSON string.
 
-**En el código**: `app/core/hash_chain.py`. La tabla `cognitive.cognitive_events` tiene las columnas `hash` y `previous_hash`. El `ctr_service.py` calcula el hash antes de cada inserción.
+**En el código**: `app/features/cognitive/hash_chain.py` (clase `HashChainService`). La tabla `cognitive.cognitive_events` tiene las columnas `event_hash` y `previous_hash`. El `CognitiveService` calcula el hash antes de cada inserción.
 
 ---
 

@@ -77,8 +77,8 @@ Este schema almacena toda la lógica operacional de la plataforma: usuarios, cur
        │                 │  exercises   │           │enrollments │   │  │
        │                 ├─────────────┤           ├────────────┤   │  │
        │                 │ id (PK)     │           │id (PK)     │   │  │
-       │                 │commission_id│(FK)────┐  │student_id  │(FK)┘  │
-       │                 │title        │        │  │commission_id│(FK)   │
+       │                 │course_id│(FK)────┐  │student_id  │(FK)┘  │
+       │                 │title        │        │  │commission_id│(FK)│
        │                 │description  │        │  │enrolled_at │       │
        │                 │test_cases   │        │  │is_active   │       │
        │                 │difficulty   │        │  └────────────┘       │
@@ -208,7 +208,7 @@ Este schema almacena toda la lógica operacional de la plataforma: usuarios, cur
 | Campo | Tipo | Constraints | Descripción |
 |-------|------|-------------|-------------|
 | `id` | `UUID` | PK | Identificador único |
-| `commission_id` | `UUID` | FK → commissions.id, NOT NULL | Comisión a la que pertenece |
+| `course_id` | `UUID` | FK → courses.id, NOT NULL | Curso al que pertenece |
 | `title` | `VARCHAR(255)` | NOT NULL | Título del ejercicio |
 | `description` | `TEXT` | NOT NULL | Enunciado completo del ejercicio |
 | `test_cases` | `JSONB` | NOT NULL | Casos de prueba para auto-corrección |
@@ -223,7 +223,7 @@ Este schema almacena toda la lógica operacional de la plataforma: usuarios, cur
 | `created_at` | `TIMESTAMPTZ` | NOT NULL | Timestamp de creación |
 | `updated_at` | `TIMESTAMPTZ` | NOT NULL | Timestamp de modificación |
 
-**Índices**: `ix_exercises_commission_id` (para listar ejercicios de una comisión), `ix_exercises_topic_tags` (GIN index, para búsqueda por tags).
+**Índices**: `ix_exercises_course_id` (para listar ejercicios de un curso), `ix_exercises_topic_tags` (GIN index, para búsqueda por tags).
 
 ---
 
@@ -271,6 +271,7 @@ Este schema almacena toda la lógica operacional de la plataforma: usuarios, cur
 | Campo | Tipo | Constraints | Descripción |
 |-------|------|-------------|-------------|
 | `id` | `UUID` | PK | Identificador único |
+| `session_id` | `UUID` | NOT NULL | Correlación lógica con cognitive_sessions.id (sin FK cross-schema, respeta ownership entre fases) |
 | `student_id` | `UUID` | FK → users.id, NOT NULL | Estudiante que interactuó |
 | `exercise_id` | `UUID` | FK → exercises.id, NOT NULL | Ejercicio en contexto |
 | `role` | `ENUM('user','assistant')` | NOT NULL | Quién envió el mensaje |
@@ -372,7 +373,7 @@ Este schema almacena toda la traza cognitiva del estudiante. Es el núcleo del s
 │ record_type             │
 │ details                 │
 │ previous_hash           │
-│ current_hash            │
+│ event_hash            │
 │ created_at              │
 └─────────────────────────┘
 ```
@@ -384,6 +385,7 @@ Este schema almacena toda la traza cognitiva del estudiante. Es el núcleo del s
 | `id` | `UUID` | PK | Identificador único de sesión |
 | `student_id` | `UUID` | NOT NULL | Referencia al user (sin FK cross-schema — se valida en service) |
 | `exercise_id` | `UUID` | NOT NULL | Referencia al ejercicio |
+| `commission_id` | `UUID` | NOT NULL | Denormalizado al crear sesión (desde payload evento o via REST). Permite agregados por comisión sin joins cross-schema |
 | `started_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT NOW() | Inicio de la sesión cognitiva |
 | `closed_at` | `TIMESTAMPTZ` | NULLABLE | Fin de la sesión. NULL = sesión abierta |
 | `genesis_hash` | `VARCHAR(64)` | NULLABLE | SHA-256 del hash inicial de la cadena: SHA256("GENESIS:" + session_id + ":" + started_at.isoformat()) |
@@ -420,7 +422,7 @@ Este schema almacena toda la traza cognitiva del estudiante. Es el núcleo del s
 |------------|-------------|---------|
 | `session.started` | Inicio de sesión con ejercicio | — |
 | `reads_problem` | El estudiante leyó el enunciado del ejercicio | N1 |
-| `code.snapshot` | El estudiante guardó un snapshot del código | N1 |
+| `code.snapshot` | El estudiante guardó un snapshot del código | N2 (Estrategia — evidencia de escritura activa) |
 | `tutor.question_asked` | El estudiante preguntó al tutor | N4 (Interacción con IA) |
 | `tutor.response_received` | El tutor respondió | N4 (Interacción con IA) |
 | `code.run` | El estudiante ejecutó el código (sandbox) | N3 (Validación) |
@@ -443,7 +445,7 @@ Este schema almacena toda la traza cognitiva del estudiante. Es el núcleo del s
 | `record_type` | `ENUM('hypothesis','strategy','validation','reflection')` | NOT NULL | Tipo de registro de razonamiento |
 | `details` | `JSONB` | NOT NULL | Detalle del razonamiento (ver sección JSONB) |
 | `previous_hash` | `VARCHAR(64)` | NOT NULL | Hash del registro anterior |
-| `current_hash` | `VARCHAR(64)` | NOT NULL | SHA-256 de este registro |
+| `event_hash` | `VARCHAR(64)` | NOT NULL | SHA-256 de este registro |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL | Timestamp |
 
 **Índices**: `ix_reasoning_records_session_id`.
@@ -463,6 +465,14 @@ Este schema almacena toda la traza cognitiva del estudiante. Es el núcleo del s
 | `total_interactions` | `INTEGER` | NOT NULL, DEFAULT 0 | Total de interacciones con el tutor |
 | `help_seeking_ratio` | `NUMERIC(4,3)` | NULLABLE | Ratio preguntas/acciones (0.0 a 1.0) |
 | `autonomy_index` | `NUMERIC(4,3)` | NULLABLE | Índice de autonomía calculado (0.0 a 1.0) |
+| `qe_score` | `NUMERIC(5,2)` | NULLABLE | Score de calidad epistémica agregado (0-100) |
+| `qe_quality_prompt` | `NUMERIC(5,2)` | NULLABLE | Componente Qe: calidad de prompts al tutor |
+| `qe_critical_evaluation` | `NUMERIC(5,2)` | NULLABLE | Componente Qe: evaluación crítica de respuestas IA |
+| `qe_integration` | `NUMERIC(5,2)` | NULLABLE | Componente Qe: integración de conocimiento |
+| `qe_verification` | `NUMERIC(5,2)` | NULLABLE | Componente Qe: verificación independiente |
+| `dependency_score` | `NUMERIC(4,3)` | NULLABLE | Ratio de interacciones N4 clasificadas como "dependent" (0.0-1.0) |
+| `reflection_score` | `NUMERIC(5,2)` | NULLABLE | Score derivado de la reflexión post-ejercicio (0-100) |
+| `success_efficiency` | `NUMERIC(5,2)` | NULLABLE | score / (intentos + tiempo normalizado) |
 | `risk_level` | `ENUM('low','medium','high','critical')` | NULLABLE | Nivel de riesgo de dependencia en IA |
 | `computed_at` | `TIMESTAMPTZ` | NULLABLE | Cuando se computaron las métricas |
 
@@ -577,7 +587,7 @@ Este schema almacena toda la traza cognitiva del estudiante. Es el núcleo del s
 | Query frecuente | Tabla | Índice |
 |----------------|-------|--------|
 | Login por email | `users` | `UNIQUE ix_users_email` |
-| Ejercicios de una comisión | `exercises` | `ix_exercises_commission_id` |
+| Ejercicios de una comisión | `exercises` | `ix_exercises_course_id` |
 | Última entrega de estudiante en ejercicio | `submissions` | `ix_submissions_student_exercise` (compuesto) |
 | Eventos CTR de una sesión en orden | `cognitive_events` | `ix_cognitive_events_session_sequence` |
 | Prompt activo del tutor | `tutor_system_prompts` | Índice parcial `WHERE is_active = TRUE` |
@@ -881,13 +891,13 @@ class HashChainService:
                 )
             else:
                 recomputed = HashChainService.compute_event_hash(
-                    events[i-1]["current_hash"],
+                    events[i-1]["event_hash"],
                     event["event_type"],
                     event["payload"],
                     event["created_at"]
                 )
             
-            if recomputed != event["current_hash"]:
+            if recomputed != event["event_hash"]:
                 return False, event["sequence_number"]
         
         return True, None
@@ -901,7 +911,7 @@ class HashChainService:
 2. CognitiveService.record_event(session_id, event_type, payload)
         │
 3. CognitiveRepository.get_last_hash(session_id)
-   → Retorna el current_hash del último evento de esa sesión
+   → Retorna el event_hash del último evento de esa sesión
    → Si no hay eventos: retorna genesis_hash de la sesión
         │
 4. HashChainService.compute_event_hash(
@@ -917,7 +927,7 @@ class HashChainService:
        sequence_number=last_sequence + 1,
        payload=payload,
        previous_hash=last_hash,
-       current_hash=new_hash,
+       event_hash=new_hash,
        created_at=now()
    )
         │

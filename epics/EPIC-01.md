@@ -12,7 +12,7 @@ Primera EPIC del proyecto. Establece la infraestructura base que todas las fases
 - Monorepo con estructura `backend/`, `frontend/`, `shared/`, `infra/`, `devOps/`
 - `docker-compose.yml` con PostgreSQL 16 + Redis 7 + API + Frontend con hot reload
 - Scripts de seed data básico
-- `.env.example` completo y documentado
+- `env.example` completo y documentado
 - `Makefile` o scripts de conveniencia (`make dev`, `make test`, `make seed`)
 - **Event Bus core infrastructure**: topología Redis Streams para comunicación entre fases.
   - Creación de los 4 streams: `events:submissions`, `events:tutor`, `events:code`, `events:cognitive`
@@ -51,7 +51,7 @@ Primera EPIC del proyecto. Establece la infraestructura base que todas las fases
 
 - [ ] Setup monorepo con estructura canónica de directorios
 - [ ] Docker Compose: PostgreSQL 16 + Redis 7 + API (FastAPI) + Frontend (Vite) con hot reload
-- [ ] `.env.example` completo con todas las variables necesarias
+- [ ] `env.example` completo con todas las variables necesarias
 - [ ] Scripts de conveniencia (`make dev`, `make test`, `make seed`)
 - [ ] CI pipeline en GitHub Actions (lint + tests + build)
 - [ ] Pre-commit hooks configurados (ruff, mypy, eslint, prettier)

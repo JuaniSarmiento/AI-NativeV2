@@ -805,7 +805,7 @@ from sqlalchemy import text
 
 router = APIRouter(tags=["health"])
 
-@router.get("/health")
+@router.get("/health")  # Con prefix /api/v1 del app → GET /api/v1/health
 async def health_check(request: Request):
     db_status = await check_database(request.app.state.db_factory)
     redis_status = await check_redis(request.app.state.redis)

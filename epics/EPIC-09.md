@@ -56,7 +56,7 @@ El corazón de la Fase 2: un chat en tiempo real entre el alumno y el tutor IA s
 - Redis para rate limiting (de EPIC-01)
 
 ### Modelos (owner — schema: operational)
-- `operational.tutor_interactions`: id (UUID PK), student_id (FK → users), exercise_id (FK → exercises), role (ENUM user/assistant), content (TEXT), n4_level (SMALLINT nullable, CHECK (n4_level BETWEEN 1 AND 4)), tokens_used (INTEGER nullable), model_version (VARCHAR 100 nullable), prompt_hash (VARCHAR 64 NOT NULL), created_at (TIMESTAMPTZ)
+- `operational.tutor_interactions`: id (UUID PK), session_id (UUID, NOT NULL — correlación lógica con cognitive_sessions.id, sin FK cross-schema), student_id (FK → users), exercise_id (FK → exercises), role (ENUM user/assistant), content (TEXT), n4_level (SMALLINT nullable, CHECK (n4_level BETWEEN 1 AND 4)), tokens_used (INTEGER nullable), model_version (VARCHAR 100 nullable), prompt_hash (VARCHAR 64 NOT NULL), created_at (TIMESTAMPTZ)
 
 ### Modelos (owner — schema: governance)
 - `governance.tutor_system_prompts`: id (UUID PK), name (VARCHAR), content (TEXT), sha256_hash (VARCHAR 64), version (VARCHAR 50, NOT NULL), is_active (BOOL), guardrails_config (JSONB), created_by (UUID, NOT NULL) -- ID del admin que creó el prompt (sin FK cross-schema, se valida en service layer), created_at (TIMESTAMPTZ), updated_at (TIMESTAMPTZ, NOT NULL)
@@ -88,7 +88,7 @@ El corazón de la Fase 2: un chat en tiempo real entre el alumno y el tutor IA s
 - Auth JWT funciona en WS handshake
 - Rate limiting activo (30 msg/hora por ejercicio)
 - Cada interacción registrada con prompt_hash SHA-256
-- `tutor_interactions` NO tiene campo `session_id` ni `policy_check_result` (no existen en el modelo canónico)
+- `tutor_interactions` tiene `session_id` (correlación lógica, sin FK cross-schema) pero NO tiene `policy_check_result` (violaciones van a governance_events)
 - `n4_level` es SMALLINT nullable con CHECK (1-4), no un enum de strings
 - Reconexión automática ante desconexión
 - Tests pasan

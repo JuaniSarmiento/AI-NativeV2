@@ -119,13 +119,13 @@ Las preguntas son incógnitas que necesitan respuesta antes de poder implementar
 
 **Contexto**: La tesis doctoral describe el modelo N4 conceptualmente. Necesitamos traducirlo a código: qué patrones en los CTRs indican N1 vs N2 vs N3 vs N4, cuánto peso tiene cada señal, qué ventana temporal se considera.
 
-**Impacto**: Sin esta respuesta, la Fase 4 no puede implementarse correctamente.
+**Impacto**: Sin esta respuesta, la Fase 3 (Motor Cognitivo + Evaluación) no puede implementarse correctamente.
 
-**Propietario**: Director de tesis + Dev 4
+**Propietario**: Director de tesis + Dev 3
 
 **Estado**: Pendiente. Reunión programada para semana 2.
 
-**Bloquea**: Implementación de Fase 4 (evaluación cognitiva N4).
+**Bloquea**: Implementación de Fase 3 (evaluación cognitiva N4).
 
 ---
 

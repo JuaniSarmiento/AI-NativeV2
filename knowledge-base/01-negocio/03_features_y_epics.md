@@ -49,9 +49,9 @@ Semanas 15-16: QA FINAL ──── Deploy staging, prueba con usuarios piloto
 | E1-S5 | Test cases del ejercicio como assertions con reporte pass/fail individual | high | E1-S3 |
 
 **Modelos de datos clave**:
-- `courses`: id (UUID PK), name, description, semester, is_active
-- `commissions`: id, course_id (FK), name, year, semester, schedule, is_active
-- `exercises`: id, commission_id (FK → commissions), title, description (markdown), difficulty, topic_taxonomy (JSONB), starter_code, test_cases (JSONB), constraints
+- `courses`: id (UUID PK), name, description, is_active
+- `commissions`: id, course_id (FK), teacher_id (FK → users), name, year, semester, is_active
+- `exercises`: id, course_id (FK → courses), title, description (markdown), difficulty, topic_taxonomy (JSONB), starter_code, test_cases (JSONB), constraints
 - `submissions`: id, student_id (FK), exercise_id (FK), code (TEXT), runtime_ms, stdout, stderr, test_results (JSONB), score, status (pending/running/passed/failed/error)
 - `code_snapshots`: id, student_id, exercise_id, submission_id (nullable FK), code, snapshot_at
 - `enrollments`: id, student_id, commission_id, enrolled_at, status
@@ -63,7 +63,7 @@ Semanas 15-16: QA FINAL ──── Deploy staging, prueba con usuarios piloto
 ## EPIC 2 — Tutor IA Socrático (Fase 2)
 
 **Duración**: Semanas 3-12 (paralelo)
-**Schema owner**: `operational` (tutor_interactions), `governance` (governance_events, tutor_system_prompts)
+**Schema owner**: `operational` (tutor_interactions). Fase 2 también escribe en `governance` (governance_events al detectar violaciones, tutor_system_prompts gestionados por admin)
 **Objetivo**: Construir el tutor de IA que acompaña al alumno — regulado, registrado, y nunca entrega soluciones.
 
 | ID | Story | Prioridad | Dependencias |
@@ -84,7 +84,7 @@ Semanas 15-16: QA FINAL ──── Deploy staging, prueba con usuarios piloto
 5. **Registrador de interacción**: persiste cada turno con clasificación N4 y resultado del policy check
 
 **Modelos de datos clave**:
-- `tutor_interactions`: id, session_id, role (user/assistant), content, n4_level, tokens_used, model_version, prompt_hash, created_at
+- `tutor_interactions`: id, session_id (correlación lógica con cognitive_sessions.id — sin FK estricta para respetar ownership entre fases), student_id, exercise_id, role (user/assistant), content, n4_level, tokens_used, model_version, prompt_hash, created_at
 - `tutor_system_prompts`: id, name, content, sha256_hash, version, is_active, guardrails_config, created_by, created_at
 - `governance_events`: id, event_type (policy_violation/prompt_update/model_change), details (JSONB)
 
@@ -114,27 +114,30 @@ Semanas 15-16: QA FINAL ──── Deploy staging, prueba con usuarios piloto
 4. **Risk Worker**: analiza patrones a nivel alumno/curso (dependencia excesiva, desenganche, estancamiento)
 5. **Evaluation Engine**: sintetiza en función evaluativa formal
 
-**Mapeo event_type → N4**:
-| event_type | Nivel N4 | Notas |
-|-----------|---------|-------|
-| `reads_problem` | N1 | Primer evento emitido por el frontend cuando el alumno abre el ejercicio |
-| `asks_clarification` | N1 | |
-| `reformulates_problem` | N1 | |
-| `defines_strategy` | N2 | |
-| `changes_strategy` | N2 | |
-| `asks_hint` | N2 | |
-| `runs_test` | N3 | |
-| `interprets_error` | N3 | |
-| `fixes_error` | N3 | |
-| `asks_explanation` | N4 | |
-| `audits_ai_suggestion` | N4 | |
+**Sistema de eventos en 3 niveles**:
+
+El sistema maneja eventos en 3 capas distintas. Fase 3 transforma los eventos del bus al formato CTR al consumirlos.
+
+| Bus Event (Redis Streams) | CTR Event (cognitive_events) | N4 Level | Notas |
+|--------------------------|----------------------------|---------|-------|
+| `reads_problem` | `reads_problem` | N1 | Frontend emite cuando alumno abre ejercicio |
+| `code.snapshot.captured` | `code.snapshot` | N2 | Cada 30s + ante ejecución |
+| `code.executed` | `code.run` | N3 | Alumno ejecuta código en sandbox |
+| `tutor.interaction.completed` | `tutor.question_asked` | N4 | Turno del alumno en chat |
+| `tutor.interaction.completed` | `tutor.response_received` | N4 | Turno del tutor en chat |
+| `exercise.submitted` | `submission.created` | N2/N3 | Alumno envía solución final |
+| `reflection.submitted` | `reflection.submitted` | — (metacognitivo) | Alimenta reflection_score |
+| — | `session.started` | — | Evento de lifecycle |
+| — | `session.closed` | — | Evento de lifecycle |
+
+Adicionalmente, Fase 3 infiere **indicadores comportamentales** del análisis de patrones sobre el CTR (no se almacenan como events): `asks_clarification` (N1), `reformulates_problem` (N1), `defines_strategy` (N2), `changes_strategy` (N2), `asks_hint` (N2), `interprets_error` (N3), `fixes_error` (N3), `asks_explanation` (N4), `audits_ai_suggestion` (N4). Estos indicadores contribuyen a los scores N1-N4 pero no son event_types del CTR.
 
 **Modelos de datos clave**:
 - `cognitive_sessions`: id (UUID PK), student_id, exercise_id, started_at, ended_at, status (open/closed/invalidated), ctr_hash_chain, is_valid_ctr
 - `cognitive_events`: id (UUID PK), session_id, event_type (enum), n4_level (N1/N2/N3/N4), payload (JSONB), sequence_number, timestamp, event_hash: VARCHAR(64) — Hash SHA-256 de este evento, parte de la cadena hash del CTR
-- `cognitive_metrics`: id, session_id, n1_comprehension_score, n2_strategy_score, n3_validation_score, n4_ai_interaction_score, total_interactions, help_seeking_ratio, autonomy_index, risk_level
+- `cognitive_metrics`: id, session_id, n1_comprehension_score, n2_strategy_score, n3_validation_score, n4_ai_interaction_score, qe_score, qe_quality_prompt, qe_critical_evaluation, qe_integration, qe_verification, dependency_score, reflection_score, success_efficiency, total_interactions, help_seeking_ratio, autonomy_index, risk_level
 - `reasoning_records`: id, session_id, classification (understanding/planning/debugging/ai_interaction/metacognition), content (JSONB), decisions (JSONB), metacognition_score
-- `risk_assessments`: id, student_id, course_id, assessment_type (dependency/disengagement/stagnation), risk_level (low/medium/high/critical), details (JSONB)
+- `risk_assessments`: id, student_id, commission_id, assessment_type (dependency/disengagement/stagnation), risk_level (low/medium/high/critical), details (JSONB)
 
 **Criterio de completitud**: Eventos se clasifican automáticamente por N1-N4. CTR con hash chain íntegro. is_valid_ctr correcto. Métricas calculadas por sesión. Dashboard docente con datos agregados. Sistema detecta alumnos en riesgo.
 

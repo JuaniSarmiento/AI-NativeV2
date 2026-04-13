@@ -73,7 +73,7 @@ La arquitectura está organizada en **4 fases de desarrollo** que mapean 1:1 a d
 
 **Estudiante**: Usuario principal. Resuelve ejercicios, interactúa con el tutor socrático, genera trazas cognitivas. Solo puede ver su propio CTR.
 
-**Docente**: Monitorea el progreso de los estudiantes de sus comisiones. Puede ver entregas (`submissions`) e interacciones con el tutor (`tutor_interactions`) de los estudiantes de sus comisiones para diagnóstico pedagógico. No tiene acceso a las trazas CTR crudas (`cognitive_events`) — solo a dashboards y métricas agregadas derivadas del modelo N4.
+**Docente**: Monitorea el progreso de los estudiantes de sus comisiones. Puede ver entregas (`submissions`), interacciones con el tutor (`tutor_interactions`), y la traza cognitiva procesada (timeline de eventos N1-N4 con código evolutivo y chat) de los estudiantes de sus comisiones. Accede vía endpoints REST de Fase 3 (`GET /teacher/sessions/{id}/trace`), no por query SQL directo a `cognitive_events`.
 
 **Administrador**: Gestiona la plataforma. Configura prompts del tutor, gestiona cursos y comisiones, audita la gobernanza del sistema.
 
@@ -225,7 +225,7 @@ Cliente HTTP/WS
 │  Responsabilidad: lógica de negocio, orquestación,      │
 │  validaciones de dominio, eventos de dominio            │
 │  NO conoce HTTP (no usa Request/Response de FastAPI)    │
-│  Lanza excepciones de dominio (DomainException),        │
+│  Lanza excepciones de dominio (DomainError),        │
 │  NO excepciones HTTP                                    │
 └─────────────────────────────┬───────────────────────────┘
                               │ llama a
@@ -251,7 +251,7 @@ Cliente HTTP/WS
 1. **Las capas solo conocen la capa inmediatamente inferior.** Un Router nunca instancia un Repository directamente.
 2. **Los Services no importan tipos de FastAPI.** `Request`, `Response`, `HTTPException` son conceptos del Router.
 3. **Los Repositories reciben la AsyncSession por constructor injection (DI).** La sesión se inyecta desde las factories de dependencias o desde el Unit of Work, nunca se instancia dentro del repositorio.
-4. **Las excepciones se transforman en la capa correcta.** `DomainException` → Router la convierte en `HTTPException`.
+4. **Las excepciones se transforman en la capa correcta.** `DomainError` → Router la convierte en `HTTPException`.
 
 ### Flujo de Ejemplo: Enviar Ejercicio
 
@@ -305,9 +305,10 @@ Esta regla es un contrato arquitectural, no solo una convención. Se implementa 
 │  Readers: analytics, governance (via REST)                         │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Schema: governance                                                 │
-│  Owner: Fase 3 (governance)                                        │
+│  Owner: Fase 2 (escribe governance_events) + Admin (gestiona       │
+│         tutor_system_prompts). Fase 3 lee para auditoría.          │
 │  Tablas: governance_events, tutor_system_prompts                   │
-│  Readers: tutor (via REST — lee el prompt activo)                  │
+│  Readers: tutor (via REST — lee el prompt activo), Fase 3 (audit)  │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Schema: analytics                                                  │
 │  Owner: Fase 3 (analytics)                                         │
@@ -347,7 +348,7 @@ backend/
     │
     ├── core/
     │   ├── security.py      # JWT encode/decode, hash de contraseñas (bcrypt)
-    │   ├── exceptions.py    # DomainException y subclases (NotFound, Forbidden, etc.)
+    │   ├── exceptions.py    # DomainError y subclases (NotFound, Forbidden, etc.)
     │   └── logging.py       # Configuración structlog con request_id
     │
     ├── features/
@@ -373,7 +374,7 @@ backend/
     │   │   └── schemas.py   # RunRequest, RunResult
     │   │
     │   ├── tutor/
-    │   │   ├── router.py    # WS /ws/tutor/chat, POST /reflection
+    │   │   ├── router.py    # WS /ws/tutor/chat
     │   │   ├── service.py   # TutorService: streaming, guardrails
     │   │   ├── adapters.py  # LLMAdapter Protocol + AnthropicAdapter
     │   │   ├── guardrails.py # Políticas anti-solver

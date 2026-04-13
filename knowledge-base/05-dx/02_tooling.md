@@ -41,9 +41,9 @@ uvicorn app.main:app --ssl-keyfile ./key.pem --ssl-certfile ./cert.pem
 El flag `--reload` monitorea cambios en archivos `.py` y reinicia automáticamente el proceso. En producción NO se usa `--reload` ni `--workers` juntos — son mutuamente excluyentes.
 
 Configuración relevante en `backend/app/core/config.py`:
-- `BACKEND_HOST`: host de binding (default `0.0.0.0`)
-- `BACKEND_PORT`: puerto (default `8000`)
-- `RELOAD`: activar reload (solo en `ENVIRONMENT=development`)
+- `HOST`: host de binding (default `0.0.0.0`)
+- `PORT`: puerto (default `8000`)
+- `DEBUG`: activar reload automáticamente cuando `DEBUG=true` y `ENVIRONMENT=development`
 
 ### pytest — Framework de Testing
 
@@ -492,7 +492,7 @@ FROM pg_indexes
 WHERE tablename = 'cognitive_events';
 
 -- Revisar el hash chain (últimos 5 registros)
-SELECT id, created_at, hash, previous_hash
+SELECT id, created_at, event_hash, previous_hash
 FROM cognitive.cognitive_events
 ORDER BY created_at DESC
 LIMIT 5;

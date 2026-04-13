@@ -438,13 +438,13 @@ hash_input = json.dumps(content)  # puede variar en algunas circunstancias
 import json
 import hashlib
 
-def compute_ctr_hash(content: dict, previous_hash: str | None) -> str:
-    payload = {
-        "content": content,
-        "previous_hash": previous_hash,
-    }
-    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False)
-    return hashlib.sha256(serialized.encode()).hexdigest()
+# Usar HashChainService (app/features/cognitive/hash_chain.py)
+class HashChainService:
+    @staticmethod
+    def compute_event_hash(previous_hash: str, event_type: str, payload: dict, created_at: datetime) -> str:
+        payload_str = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        data = f"{previous_hash}{event_type}{payload_str}{created_at.isoformat()}"
+        return hashlib.sha256(data.encode("utf-8")).hexdigest()
 ```
 
 ### Los CTR son inmutables — sin soft delete

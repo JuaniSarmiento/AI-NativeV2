@@ -19,7 +19,7 @@ Este es el flujo central del sistema. Involucra las 4 fases y produce un CTR com
 9.  Alumno modifica código → ejecuta → pasa tests ── [N3]
 10. Click "Enviar" ───────────────────────────────── [Fase 4 → POST /submit Fase 1]
 11. Se cierra sesión cognitiva ───────────────────── [Fase 3]
-12. Formulario de reflexión ──────────────────────── [Fase 4 → POST /reflection Fase 2]
+12. Formulario de reflexión ──────────────────────── [Fase 4 → POST /api/v1/submissions/{id}/reflection Fase 2]
     └─ Fase 3 recibe evento metacognición
 13. Fase 3 calcula métricas:
     ├─ N1=0.7, N2=0.6, N3=0.9, N4=0.8
@@ -46,6 +46,7 @@ Cada acción del alumno genera un evento interno que Fase 3 consume:
 | Corrige error | Fase 4 | `fixes_error` | N3 |
 | Pide explicación al tutor | Fase 2 | `asks_explanation` | N4 |
 | Audita sugerencia del tutor | Fase 2 | `audits_ai_suggestion` | N4 |
+| Completa reflexión post-ejercicio | Fase 2 | `submits_reflection` | — (metacognitivo) |
 
 ---
 

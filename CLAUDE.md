@@ -84,7 +84,7 @@ Router (thin — HTTP/WS only)
 | Cognitive Trace Engine | Registra eventos, construye CTR, clasifica N1-N4 | Fase 3 |
 | Cognitive Analytics Engine | Interpreta CTR, calcula métricas, infiere calidad epistémica | Fase 3 |
 | Evaluation Engine | Aplica función evaluativa E = f(N1,N2,N3,N4,Qe) | Fase 3 |
-| Governance Layer | Auditoría, versionado, coherencia semántica | Fase 3 |
+| Governance Layer | Auditoría, versionado, coherencia semántica | Fase 2 escribe events, Admin gestiona prompts, Fase 3 audita |
 
 ## Reglas Críticas — No Negociables
 
@@ -344,7 +344,7 @@ ai-native/
 ├── knowledge-base/                    # Documentación de dominio + arquitectura
 ├── openspec/                          # SDD: changes, specs
 ├── scaffold-decisions.yaml            # Fuente de verdad del scaffold
-└── .env.example
+└── env.example
 ```
 
 ## Claude Code Integration

@@ -87,76 +87,57 @@ backend/tests/
 ```python
 # backend/tests/unit/test_hash_chain.py
 import pytest
-import hashlib
-import json
-from app.core.hash_chain import compute_ctr_hash, verify_chain_integrity
+from datetime import datetime, timezone
+from uuid import uuid4
+from app.features.cognitive.hash_chain import HashChainService
+
+svc = HashChainService
 
 @pytest.mark.unit
-class TestComputeCTRHash:
-    def test_compute_hash_is_deterministic(self):
-        """El mismo input debe producir siempre el mismo hash."""
-        content = {"action": "submit_code", "code": "print('hello')"}
-        previous_hash = "abc123"
-        
-        hash1 = compute_ctr_hash(content, previous_hash)
-        hash2 = compute_ctr_hash(content, previous_hash)
-        
-        assert hash1 == hash2
-    
-    def test_compute_hash_is_sha256(self):
-        """El hash debe ser SHA-256 (64 caracteres hex)."""
-        hash_value = compute_ctr_hash({"a": 1}, None)
-        assert len(hash_value) == 64
-        assert all(c in "0123456789abcdef" for c in hash_value)
-    
-    def test_compute_hash_uses_sorted_keys(self):
-        """El orden de las claves no debe afectar el hash."""
-        content_a = {"b": 2, "a": 1}
-        content_b = {"a": 1, "b": 2}
-        
-        hash_a = compute_ctr_hash(content_a, None)
-        hash_b = compute_ctr_hash(content_b, None)
-        
-        assert hash_a == hash_b
-    
-    def test_different_previous_hash_produces_different_hash(self):
-        """Cambiar el previous_hash debe cambiar el hash resultante."""
-        content = {"action": "test"}
-        
-        hash1 = compute_ctr_hash(content, "previous_hash_a")
-        hash2 = compute_ctr_hash(content, "previous_hash_b")
-        
-        assert hash1 != hash2
-    
-    def test_first_record_has_none_previous_hash(self):
-        """El primer CTR tiene previous_hash=None."""
-        hash_value = compute_ctr_hash({"action": "first"}, None)
-        assert hash_value is not None
-        assert len(hash_value) == 64
+class TestGenesisHash:
+    def test_genesis_hash_is_deterministic(self):
+        sid, ts = uuid4(), datetime(2026, 4, 10, tzinfo=timezone.utc)
+        assert svc.compute_genesis_hash(sid, ts) == svc.compute_genesis_hash(sid, ts)
+
+    def test_genesis_hash_is_sha256(self):
+        h = svc.compute_genesis_hash(uuid4(), datetime.now(timezone.utc))
+        assert len(h) == 64 and all(c in "0123456789abcdef" for c in h)
 
 @pytest.mark.unit
-class TestVerifyChainIntegrity:
-    def test_valid_chain_passes_verification(self, valid_ctr_chain):
-        assert verify_chain_integrity(valid_ctr_chain) is True
-    
-    def test_tampered_content_breaks_chain(self, valid_ctr_chain):
-        # Tamper con el contenido del segundo registro
-        valid_ctr_chain[1].content["tampered"] = True
-        
-        assert verify_chain_integrity(valid_ctr_chain) is False
-    
-    def test_missing_record_breaks_chain(self, valid_ctr_chain):
-        # Remover el segundo registro del medio
-        broken_chain = [valid_ctr_chain[0], valid_ctr_chain[2]]
-        
-        assert verify_chain_integrity(broken_chain) is False
-    
-    def test_empty_chain_passes_verification(self):
-        assert verify_chain_integrity([]) is True
-    
-    def test_single_record_chain_passes_verification(self):
-        single_record = [MockCTR(hash="valid_hash", previous_hash=None, content={})]
-        assert verify_chain_integrity(single_record) is True
+class TestEventHash:
+    def test_event_hash_is_deterministic(self):
+        payload = {"action": "submit_code", "code": "print('hello')"}
+        ts = datetime.now(timezone.utc)
+        h1 = svc.compute_event_hash("prev", "code.run", payload, ts)
+        h2 = svc.compute_event_hash("prev", "code.run", payload, ts)
+        assert h1 == h2
+
+    def test_sorted_keys_produce_same_hash(self):
+        ts = datetime.now(timezone.utc)
+        h1 = svc.compute_event_hash("prev", "code.run", {"b": 2, "a": 1}, ts)
+        h2 = svc.compute_event_hash("prev", "code.run", {"a": 1, "b": 2}, ts)
+        assert h1 == h2
+
+    def test_different_previous_hash_different_result(self):
+        payload, ts = {"x": 1}, datetime.now(timezone.utc)
+        h1 = svc.compute_event_hash("prev_a", "code.run", payload, ts)
+        h2 = svc.compute_event_hash("prev_b", "code.run", payload, ts)
+        assert h1 != h2
+
+@pytest.mark.unit
+class TestVerifyChain:
+    def test_valid_chain_passes(self, valid_event_chain):
+        ok, broken = svc.verify_chain(valid_event_chain)
+        assert ok is True and broken is None
+
+    def test_tampered_payload_breaks_chain(self, valid_event_chain):
+        valid_event_chain[1]["payload"]["tampered"] = True
+        ok, seq = svc.verify_chain(valid_event_chain)
+        assert ok is False
+
+    def test_empty_chain_passes(self):
+        ok, _ = svc.verify_chain([])
+        assert ok is True
 ```
 
 ### Ejemplo — Test de servicio con mocks
@@ -724,7 +705,7 @@ def make_exercise(
 
 | Módulo | Objetivo | Prioridad |
 |---|---|---|
-| `app/core/hash_chain.py` | **100%** (target independiente) | Crítico |
+| `app/features/cognitive/hash_chain.py` | **100%** (target independiente) | Crítico |
 | `app/features/tutor/service.py` | 90%+ | Crítico |
 | `app/core/security.py` | 95%+ | Crítico |
 | `app/core/` (resto) | 90%+ | Alto |

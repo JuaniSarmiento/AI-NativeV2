@@ -1067,7 +1067,7 @@ class CognitiveBehaviorIndicator(str, Enum):
 # Mapeo de evento almacenado a dimensión N4 que activa
 EVENT_TO_N4_HINT: dict[CognitiveEventType, N4Level] = {
     CognitiveEventType.READS_PROBLEM: N4Level.N1,
-    CognitiveEventType.REFLECTION_SUBMITTED: N4Level.N1,
+    CognitiveEventType.REFLECTION_SUBMITTED: N4Level.N1,  # También contribuye a N2 — ver mapeo canónico en 02_modelo_de_datos.md
     CognitiveEventType.CODE_SNAPSHOT: N4Level.N2,
     CognitiveEventType.SUBMISSION_CREATED: N4Level.N2,
     CognitiveEventType.CODE_RUN: N4Level.N3,

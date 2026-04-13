@@ -73,4 +73,4 @@
 
 ---
 
-**Total**: 35 archivos | **Fuente de verdad**: `scaffold-decisions.yaml`
+**Total**: 35 archivos de documentación + 8 resúmenes consolidados en `_resumen/` | **Fuente de verdad**: `scaffold-decisions.yaml`

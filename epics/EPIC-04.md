@@ -11,7 +11,7 @@ Establece los contratos que permiten desarrollo paralelo sin sorpresas de integr
 ### Backend
 - OpenAPI spec auto-generado desde FastAPI (`/openapi.json`)
 - Schemas Pydantic para respuesta estándar: `{ status, data, meta, errors }`
-- Healthcheck endpoints: `GET /health`, `GET /health/full`
+- Healthcheck endpoints: `GET /api/v1/health`, `GET /health/full`
 
 ### Frontend
 - MSW (Mock Service Worker) configurado con handlers basados en OpenAPI spec

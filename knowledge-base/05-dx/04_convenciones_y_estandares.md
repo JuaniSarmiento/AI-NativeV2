@@ -173,7 +173,7 @@ enum ExerciseDifficulty {
 | Eliminación física | `delete_` | `delete_expired_tokens` |
 | Verificación booleana | `is_`, `has_`, `can_` | `is_token_expired`, `has_permission` |
 | Validación (lanza o retorna bool) | `validate_` | `validate_hash_chain` |
-| Cálculo | `compute_`, `calculate_` | `compute_ctr_hash` |
+| Cálculo | `compute_`, `calculate_` | `compute_event_hash` |
 | Transformación | `to_`, `from_`, `map_` | `to_response_schema` |
 
 ---
@@ -314,7 +314,7 @@ is_active: Mapped[bool]         # booleanos con prefijo is_/has_/can_
 
 # Índices: ix_{tabla}_{columna(s)}
 Index("ix_users_email", User.email, unique=True)
-Index("ix_ctrs_user_created", CognitiveEvent.user_id, CognitiveEvent.created_at)
+Index("ix_cognitive_events_session_sequence", CognitiveEvent.session_id, CognitiveEvent.sequence_number)
 ```
 
 ---
@@ -333,17 +333,17 @@ Index("ix_ctrs_user_created", CognitiveEvent.user_id, CognitiveEvent.created_at)
 Ejemplos concretos del proyecto:
 
 ```
-GET    /api/v1/exercises                    # listar ejercicios (paginado)
-POST   /api/v1/exercises                    # crear ejercicio
-GET    /api/v1/exercises/{exercise_id}      # obtener ejercicio
-PATCH  /api/v1/exercises/{exercise_id}      # actualizar ejercicio (parcial)
-DELETE /api/v1/exercises/{exercise_id}      # soft delete
+GET    /api/v1/courses/{course_id}/exercises  # listar ejercicios de un curso (paginado)
+POST   /api/v1/courses/{course_id}/exercises  # crear ejercicio (docente/admin)
+GET    /api/v1/exercises/{exercise_id}        # obtener ejercicio por ID
+PUT    /api/v1/exercises/{exercise_id}        # actualizar ejercicio
+DELETE /api/v1/exercises/{exercise_id}        # soft delete
 
-GET    /api/v1/exercises/{exercise_id}/sessions          # sesiones de un ejercicio
-POST   /api/v1/exercises/{exercise_id}/sessions          # iniciar sesión
+POST   /api/v1/student/exercises/{exercise_id}/run      # ejecutar código en sandbox
+POST   /api/v1/student/exercises/{exercise_id}/submit   # enviar submission
 
-POST   /api/v1/exercises/{exercise_id}/sessions/{session_id}/messages  # enviar mensaje al tutor
-GET    /api/v1/exercises/{exercise_id}/sessions/{session_id}/ctr       # obtener CTRs de la sesión
+WS     /ws/tutor/chat?token=<jwt>            # chat streaming con tutor (exercise_id en init msg)
+GET    /api/v1/teacher/sessions/{session_id}/trace      # obtener traza CTR
 
 POST   /api/v1/auth/login                   # acción de login (verbo como sub-path)
 POST   /api/v1/auth/logout
@@ -382,7 +382,7 @@ PATCH  /api/v1/users/me
 ### Query params de paginación y filtrado
 
 ```
-GET /api/v1/exercises?page=1&per_page=20&difficulty=2&topic_id=uuid&is_active=true&q=fibonacci
+GET /api/v1/courses/{course_id}/exercises?page=1&per_page=20&difficulty=easy&topic_tags=recursion&is_active=true
 ```
 
 - `page`: número de página, default 1, mínimo 1

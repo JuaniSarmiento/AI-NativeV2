@@ -11,7 +11,7 @@ El sandbox ejecuta código Python de los alumnos de forma segura y aislada. Es u
 ### Backend
 - Sandbox engine: subprocess con límites de CPU/memoria/tiempo
 - Test runner: ejecuta assertions individuales contra el código del alumno
-- Endpoint: `POST /api/v1/exercises/{id}/run` → `{ stdout, stderr, runtime_ms, test_results, status }`
+- Endpoint: `POST /api/v1/student/exercises/{id}/run` → `{ stdout, stderr, runtime_ms, test_results, status }`
 - Manejo de edge cases: timeout, memory exceeded, syntax error, runtime error, infinite loop
 - Emisión de eventos al Event Bus para cada ejecución (éxito y fallo)
 - Logging de cada ejecución (para auditoría)
@@ -27,7 +27,7 @@ El sandbox ejecuta código Python de los alumnos de forma segura y aislada. Es u
 ## Contratos
 
 ### Produce
-- `POST /api/v1/exercises/{id}/run` → resultado de ejecución
+- `POST /api/v1/student/exercises/{id}/run` → resultado de ejecución
 - `SandboxService` reutilizable por EPIC-08 (submission flow)
 - Evento `code.executed` (stream: `events:code`) — emitido en cada ejecución exitosa. Payload: `{ student_id, exercise_id, session_id, code, language, stdout, stderr, exit_code, execution_time_ms, test_results, timestamp }`
 - Evento `code.execution.failed` (stream: `events:code`) — emitido cuando la ejecución falla (timeout, memory, syntax error, runtime error). Payload: `{ student_id, exercise_id, session_id, code, language, error_type, stderr, execution_time_ms, timestamp }`
@@ -47,7 +47,7 @@ El sandbox ejecuta código Python de los alumnos de forma segura y aislada. Es u
 
 - [ ] Sandbox engine: subprocess con timeout 10s, memory 128MB, sin red, sin filesystem
 - [ ] Test runner: ejecutar assertions individuales, reporte pass/fail por caso
-- [ ] Endpoint `POST /api/v1/exercises/{id}/run`
+- [ ] Endpoint `POST /api/v1/student/exercises/{id}/run`
 - [ ] Manejo de edge cases: timeout, memory, syntax error, runtime error, infinite loop
 - [ ] Emisión del evento `code.executed` al Event Bus tras ejecución exitosa
 - [ ] Emisión del evento `code.execution.failed` al Event Bus tras ejecución fallida

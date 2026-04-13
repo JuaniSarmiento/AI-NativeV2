@@ -113,8 +113,8 @@
 
 | Prioridad | Total items | % del backlog |
 |-----------|------------|---------------|
-| P0 — Critical | 28 | 40% |
-| P1 — High | 29 | 41% |
-| P2 — Medium | 10 | 14% |
-| P3 — Low | 3 | 4% |
+| P0 — Critical | 32 | 46% |
+| P1 — High | 28 | 40% |
+| P2 — Medium | 8 | 11% |
+| P3 — Low | 2 | 3% |
 | **Total** | **70** | **100%** |

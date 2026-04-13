@@ -335,7 +335,7 @@ ai-native/
 ├── knowledge-base/                    # Documentación de dominio + arquitectura
 ├── openspec/                          # SDD: changes, specs
 ├── scaffold-decisions.yaml            # Fuente de verdad del scaffold
-└── .env.example
+└── env.example
 ```
 
 ## Reglas

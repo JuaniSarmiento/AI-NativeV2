@@ -37,7 +37,7 @@ El objetivo es establecer la infraestructura base que las 4 fases paralelas nece
 - [ ] Scripts de seed data básico
 - [ ] Pipeline CI/CD en GitHub Actions (lint, test, build)
 - [ ] Pre-commit hooks (ruff, mypy, eslint, prettier)
-- [ ] `.env.example` completo y documentado
+- [ ] `env.example` completo y documentado
 
 **Base de Datos**
 - [ ] 4 schemas creados: `operational`, `cognitive`, `governance`, `analytics`
@@ -50,7 +50,7 @@ El objetivo es establecer la infraestructura base que las 4 fases paralelas nece
 - [ ] Estructura de carpetas establecida (routers, services, repositories, models, schemas)
 - [ ] FastAPI application factory configurada
 - [ ] Middleware de CORS, logging, error handling
-- [ ] Endpoints de healthcheck (`/health`, `/health/full`)
+- [ ] Endpoints de healthcheck (`/api/v1/health`, `/api/v1/health/full`)
 - [ ] Sistema de configuración via Pydantic Settings
 - [ ] Dependencias base: async session factory, UoW pattern
 
@@ -204,12 +204,12 @@ Cada developer es responsable de su fase de extremo a extremo: backend, frontend
 
 ---
 
-### Fase 4 — Evaluación Cognitiva N4
+### Fase 4 — Frontend Completo
 
 **Developer**: Dev 4
 **Semanas**: 3-12 (10 semanas)
 
-**Objetivo**: Motor de evaluación del nivel cognitivo (N1-N4) basado en los CTRs, con dashboard de analytics.
+**Objetivo**: Todo lo que los usuarios ven y tocan — dashboards alumno/docente, Monaco editor, chat streaming, traza cognitiva visual. La evaluación cognitiva N4 pertenece a Fase 3 (Motor Cognitivo + Evaluación).
 
 **Backend**
 - Algoritmo de scoring N1-N4 basado en los CTRs de una sesión

@@ -53,7 +53,7 @@ El flujo completo de cómo un alumno trabaja en un ejercicio: escribe código, e
 
 ## Dependencias
 - **Blocked by**: EPIC-06, EPIC-07 (necesita ejercicios y sandbox)
-- **Blocks**: EPIC-09 (el chat del tutor necesita contexto del código actual), EPIC-13 (CTR consume eventos de submissions), EPIC-16 (traza visual consume code_snapshots)
+- **Blocks**: EPIC-09 (el chat del tutor necesita contexto del código actual), EPIC-12 (reflexión necesita submissions), EPIC-13 (CTR consume eventos de submissions), EPIC-16 (traza visual consume code_snapshots)
 
 ## Stories
 

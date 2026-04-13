@@ -711,18 +711,16 @@ export const handlers = [
   }),
 
   // ── Tutor ─────────────────────────────────────
-  http.post("/api/v1/tutor/sessions", () => {
-    return HttpResponse.json({
-      id: "mock-session-uuid",
-      user_id: MOCK_USER.id,
-      started_at: new Date().toISOString(),
-      status: "active",
-    }, { status: 201 });
+  // NOTA: El tutor usa WebSocket (WS /ws/tutor/chat), no REST.
+  // MSW 2.x soporta WS mocking via ws.link(). Para testing HTTP,
+  // se mockea el endpoint de interacciones del docente:
+  http.get("/api/v1/teacher/tutor/interactions", () => {
+    return HttpResponse.json({ status: "ok", data: [], meta: { page: 1, per_page: 20, total: 0, total_pages: 0 } });
   }),
 
   // ── Exercises ─────────────────────────────────
-  http.get("/api/v1/exercises", () => {
-    return HttpResponse.json({ items: MOCK_EXERCISES, total: MOCK_EXERCISES.length });
+  http.get("/api/v1/courses/:courseId/exercises", () => {
+    return HttpResponse.json({ status: "ok", data: MOCK_EXERCISES, meta: { page: 1, per_page: 20, total: MOCK_EXERCISES.length, total_pages: 1 } });
   }),
 
   http.get("/api/v1/exercises/:id", ({ params }) => {

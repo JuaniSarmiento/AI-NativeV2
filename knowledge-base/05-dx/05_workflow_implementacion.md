@@ -56,7 +56,7 @@ Antes de tocar código, debe existir una issue de GitHub que justifique el traba
 
 ```markdown
 ## Descripción
-Agregar filtro por dificultad (1-4) al endpoint GET /api/v1/exercises y al componente ExerciseList del frontend.
+Agregar filtro por dificultad (1-4) al endpoint GET /api/v1/courses/{course_id}/exercises y al componente ExerciseList del frontend.
 
 ## Motivación
 Los alumnos de los primeros años solo deben ver ejercicios de dificultad 1-2. Actualmente ven todos los ejercicios y se desorientan.
@@ -566,12 +566,12 @@ Descripción del PR:
 ```markdown
 ## Qué cambia
 Agrega soporte para filtrar ejercicios por nivel de dificultad (1-4) en el endpoint 
-`GET /api/v1/exercises` y en el componente `ExerciseList` del frontend.
+`GET /api/v1/courses/{course_id}/exercises` y en el componente `ExerciseList` del frontend.
 
 ## Cómo testearlo
 1. Backend: `pytest tests/ -v -k "difficulty"`
 2. Frontend: `npm run test:run`
-3. Manual: `GET /api/v1/exercises?difficulty=2` debe retornar solo ejercicios de nivel 2
+3. Manual: `GET /api/v1/courses/{course_id}/exercises?difficulty=2` debe retornar solo ejercicios de nivel 2
 
 ## Screenshots
 [Si aplica para cambios visuales en el frontend]

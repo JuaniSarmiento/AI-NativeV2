@@ -105,7 +105,7 @@ ai-native-platform/
 ├── scaffold-decisions.yaml       # Fuente de verdad del scaffold
 ├── docker-compose.yml
 ├── docker-compose.override.yml  # Solo existe en dev
-├── .env.example
+├── env.example
 └── Makefile
 ```
 
@@ -113,43 +113,39 @@ ai-native-platform/
 
 ```bash
 # Copiar el template de variables de entorno
-cp .env.example .env
+cp env.example .env
 ```
 
 Abrir `.env` y completar los valores que tienen `CHANGE_ME`:
 
 ```dotenv
-# === POSTGRES ===
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_DB=ainative
-POSTGRES_USER=ainative_user
-POSTGRES_PASSWORD=CHANGE_ME          # Cambiar en dev por algo memorable
+# === BASE DE DATOS ===
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/ainative
+# Formato: postgresql+asyncpg://{user}:{password}@{host}:{port}/{dbname}
 
 # === REDIS ===
-REDIS_HOST=localhost
-REDIS_PORT=6379
+REDIS_URL=redis://localhost:6379/0
 
-# === JWT ===
+# === SEGURIDAD ===
 SECRET_KEY=CHANGE_ME                 # Generar con: openssl rand -hex 32
-JWT_ALGORITHM=HS256
-JWT_ACCESS_TOKEN_EXPIRE_MINUTES=15
-JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
+ACCESS_TOKEN_EXPIRE_MINUTES=15
+REFRESH_TOKEN_EXPIRE_DAYS=7
 
 # === ANTHROPIC ===
 ANTHROPIC_API_KEY=CHANGE_ME          # Obtener en https://console.anthropic.com/
 ANTHROPIC_MODEL=claude-sonnet-4-20250514
 ANTHROPIC_MAX_TOKENS=4096
 
-# === BACKEND ===
-BACKEND_HOST=0.0.0.0
-BACKEND_PORT=8000
+# === SERVIDOR ===
+HOST=0.0.0.0
+PORT=8000
 ENVIRONMENT=development
+DEBUG=true
 LOG_LEVEL=DEBUG
 
-# === FRONTEND ===
-VITE_API_BASE_URL=http://localhost:8000
-VITE_WS_BASE_URL=ws://localhost:8000
+# === FRONTEND (en frontend/.env) ===
+VITE_API_URL=http://localhost:8000
+VITE_WS_URL=ws://localhost:8000
 ```
 
 > IMPORTANTE: Nunca committear el archivo `.env` con credenciales reales. El `.gitignore` ya lo excluye, pero verificalo con `git status`.
@@ -293,11 +289,11 @@ Endpoints de healthcheck:
 
 ```bash
 # Healthcheck básico
-curl http://localhost:8000/health
+curl http://localhost:8000/api/v1/health
 # Respuesta: {"status":"ok","version":"0.1.0"}
 
 # Healthcheck con dependencias (postgres, redis)
-curl http://localhost:8000/health/full
+curl http://localhost:8000/api/v1/health/full
 # Respuesta: {"status":"ok","postgres":"connected","redis":"connected"}
 ```
 
@@ -330,12 +326,12 @@ El frontend usa variables con prefijo `VITE_` en un archivo `.env` dentro de `fr
 
 ```bash
 # frontend/.env (crearlo manualmente si no existe — ver sección 8)
-VITE_API_BASE_URL=http://localhost:8000
-VITE_WS_BASE_URL=ws://localhost:8000
+VITE_API_URL=http://localhost:8000
+VITE_WS_URL=ws://localhost:8000
 VITE_APP_ENV=development
 ```
 
-> El archivo `frontend/.env` NO se crea automáticamente. Si no existe, crearlo manualmente con los valores anteriores (ver sección 8 — "Error: VITE_API_BASE_URL is not defined").
+> El archivo `frontend/.env` NO se crea automáticamente. Si no existe, crearlo manualmente con los valores anteriores (ver sección 8 — "Error: VITE_API_URL is not defined").
 
 > Las variables `VITE_*` se exponen al cliente. Nunca poner secrets ahí.
 
@@ -350,11 +346,11 @@ VITE_APP_ENV=development
 docker compose ps  # postgres y redis Up
 
 # 2. Backend corriendo
-curl http://localhost:8000/health
+curl http://localhost:8000/api/v1/health
 # {"status":"ok"}
 
 # 3. Backend conecta a postgres y redis
-curl http://localhost:8000/health/full
+curl http://localhost:8000/api/v1/health/full
 # {"status":"ok","postgres":"connected","redis":"connected"}
 
 # 4. Login via API
@@ -525,7 +521,7 @@ alembic upgrade head
 python scripts/seed_data.py
 ```
 
-### Error en frontend: `VITE_API_BASE_URL is not defined`
+### Error en frontend: `VITE_API_URL is not defined`
 
 **Causa**: El archivo `frontend/.env` no existe o no tiene la variable.
 
@@ -534,7 +530,7 @@ python scripts/seed_data.py
 # Verificar que existe
 ls frontend/.env
 # Si no existe:
-cp .env.example frontend/.env
+cp env.example frontend/.env
 # Editar frontend/.env con los valores correctos
 ```
 
