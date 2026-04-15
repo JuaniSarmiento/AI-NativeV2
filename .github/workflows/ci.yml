@@ -1,0 +1,160 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  backend-lint:
+    name: Backend Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "backend/.[dev]"
+
+      - name: Run ruff
+        run: ruff check backend/
+
+      - name: Run mypy
+        run: mypy backend/app/ --ignore-missing-imports
+
+  frontend-lint:
+    name: Frontend Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+
+      - name: Run ESLint
+        run: cd frontend && npx eslint .
+
+      - name: Run Prettier check
+        run: cd frontend && npx prettier --check .
+
+  backend-test:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ainative
+          POSTGRES_PASSWORD: ainative
+          POSTGRES_DB: ainative_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://ainative:ainative@localhost:5432/ainative_test
+      REDIS_URL: redis://localhost:6379
+      SECRET_KEY: ci-test-secret-key-not-for-production
+      ANTHROPIC_API_KEY: sk-ant-placeholder-for-ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "backend/.[dev]"
+
+      - name: Run pytest
+        run: pytest backend/tests/ --tb=short -q
+
+  frontend-test:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+
+      - name: Run Vitest
+        run: cd frontend && npx vitest run
+
+  build:
+    name: Build Check
+    runs-on: ubuntu-latest
+    needs: [backend-lint, frontend-lint]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "backend/.[dev]"
+
+      - name: Check backend imports
+        working-directory: backend
+        env:
+          SECRET_KEY: ci-test-secret-key-not-for-production
+          DATABASE_URL: postgresql+asyncpg://ainative:ainative@localhost:5432/ainative
+          REDIS_URL: redis://localhost:6379
+          ANTHROPIC_API_KEY: sk-ant-placeholder-for-ci
+        run: python -c "from app.main import create_app"
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+
+      - name: Build frontend
+        run: cd frontend && npm run build

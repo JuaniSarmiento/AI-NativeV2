@@ -2,7 +2,8 @@ version: "3.9"
 
 services:
   api:
-    image: python:3.12-slim
+    build:
+      context: ../backend
     working_dir: /app
     volumes:
       - ../backend:/app
@@ -15,12 +16,15 @@ services:
         condition: service_healthy
     env_file:
       - ../.env
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ainative:ainative@db:5432/ainative
+      REDIS_URL: redis://redis:6379/0
+    command: uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 --reload
     networks:
       - ainative-net
 
   db:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     ports:
       - "5432:5432"
     environment:
@@ -56,9 +60,14 @@ services:
     working_dir: /app
     volumes:
       - ../frontend:/app
+      - frontend-node-modules:/app/node_modules
     ports:
       - "5173:5173"
-    command: npm run dev -- --host 0.0.0.0
+    environment:
+      VITE_PROXY_TARGET: http://api:8000
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    depends_on:
+      - api
     networks:
       - ainative-net
 
@@ -69,3 +78,4 @@ networks:
 volumes:
   postgres-data:
   redis-data:
+  frontend-node-modules:
