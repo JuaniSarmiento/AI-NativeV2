@@ -90,13 +90,6 @@ def test_engine(test_database_url: str):  # type: ignore[no-untyped-def]
                     "DROP TABLE IF EXISTS public.alembic_version"
                 )
             )
-            # Drop orphaned ENUMs that may linger in public schema
-            for enum_name in ("user_role", "exercise_difficulty", "activity_status", "llm_provider"):
-                await conn.execute(
-                    __import__("sqlalchemy").text(
-                        f"DROP TYPE IF EXISTS {enum_name} CASCADE"
-                    )
-                )
 
     # Ensure a clean slate in case a previous test run crashed mid-setup.
     asyncio.run(_reset_db())
@@ -176,28 +169,15 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     Overrides the ``get_async_session`` dependency so every request in the
     test uses the same savepoint-backed session — data is rolled back after each test.
     """
-    import redis.asyncio as aioredis
     from app.main import create_app
     from app.shared.db.session import get_async_session
-    from app.features.auth.dependencies import get_redis
 
     app = create_app()
 
-    # Override DB session
     async def _override_session() -> AsyncGenerator[AsyncSession, None]:
         yield db_session
 
-    # Override Redis — fresh connection per test, properly closed
-    test_redis = aioredis.from_url(
-        os.environ.get("REDIS_URL", "redis://localhost:6379"),
-        decode_responses=True,
-    )
-
-    async def _override_redis() -> aioredis.Redis:
-        return test_redis
-
     app.dependency_overrides[get_async_session] = _override_session
-    app.dependency_overrides[get_redis] = _override_redis
 
     transport = ASGITransport(app=app)  # type: ignore[arg-type]
     async with AsyncClient(
@@ -205,5 +185,3 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
         base_url="http://testserver",
     ) as ac:
         yield ac
-
-    await test_redis.aclose()

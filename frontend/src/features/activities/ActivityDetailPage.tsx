@@ -39,8 +39,9 @@ export default function ActivityDetailPage() {
 
   async function handleDelete() {
     if (!activityId) return;
+    const courseId = activity?.course_id;
     await deleteActivity(activityId);
-    navigate('/activities');
+    navigate(courseId ? `/courses/${courseId}` : '/courses');
   }
 
   if (isLoading || !activity) {

@@ -40,7 +40,13 @@ async def list_courses(
     per_page: int = Query(20, ge=1, le=100),
 ) -> dict:
     service = CourseService(session)
-    items, total = await service.list(page=page, per_page=per_page)
+    # Docente sees only courses where they have commissions; admin sees all
+    if current_user.role.value == "docente":
+        items, total = await service.list_by_teacher(
+            current_user.id, page=page, per_page=per_page
+        )
+    else:
+        items, total = await service.list(page=page, per_page=per_page)
     total_pages = (total + per_page - 1) // per_page
     return PaginatedResponse(
         data=[CourseResponse.model_validate(c) for c in items],

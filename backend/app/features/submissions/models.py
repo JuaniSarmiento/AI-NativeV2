@@ -7,12 +7,14 @@ from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
     Numeric,
     SmallInteger,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -66,6 +68,9 @@ class ActivitySubmission(Base):
     student: Mapped["User"] = relationship("User", foreign_keys=[student_id])
     submissions: Mapped[list["Submission"]] = relationship(
         "Submission", back_populates="activity_submission",
+    )
+    reflection: Mapped["Reflection | None"] = relationship(
+        "Reflection", back_populates="activity_submission", uselist=False,
     )
 
     def __repr__(self) -> str:
@@ -150,3 +155,68 @@ class CodeSnapshot(Base):
 
     def __repr__(self) -> str:
         return f"<CodeSnapshot id={self.id} exercise={self.exercise_id}>"
+
+
+class Reflection(Base):
+    """Student's post-exercise reflection linked one-to-one with an ActivitySubmission.
+
+    Captures difficulty perception, strategy description, AI usage evaluation,
+    what the student would change, and confidence level — all used by the
+    Cognitive Trace Engine (Fase 3) to assess N3/N4 indicators.
+
+    Schema: operational.
+    """
+
+    __tablename__ = "reflections"
+    __table_args__ = (
+        CheckConstraint("difficulty_perception BETWEEN 1 AND 5", name="ck_reflections_difficulty_range"),
+        CheckConstraint("confidence_level BETWEEN 1 AND 5", name="ck_reflections_confidence_range"),
+        UniqueConstraint("activity_submission_id", name="uq_reflections_activity_submission_id"),
+        {"schema": "operational"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"),
+    )
+    activity_submission_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("operational.activity_submissions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("operational.users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    difficulty_perception: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, comment="1 (very easy) to 5 (very hard)",
+    )
+    strategy_description: Mapped[str] = mapped_column(
+        Text, nullable=False, comment="Free-text description of the strategy used",
+    )
+    ai_usage_evaluation: Mapped[str] = mapped_column(
+        Text, nullable=False, comment="Student's self-evaluation of AI usage during the exercise",
+    )
+    what_would_change: Mapped[str] = mapped_column(
+        Text, nullable=False, comment="What the student would do differently next time",
+    )
+    confidence_level: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, comment="1 (not confident) to 5 (very confident)",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+
+    # Relationships
+    activity_submission: Mapped["ActivitySubmission"] = relationship(
+        "ActivitySubmission", back_populates="reflection",
+    )
+    student: Mapped["User"] = relationship("User", foreign_keys=[student_id])
+
+    def __repr__(self) -> str:
+        return (
+            f"<Reflection id={self.id} "
+            f"activity_submission={self.activity_submission_id} "
+            f"difficulty={self.difficulty_perception}>"
+        )

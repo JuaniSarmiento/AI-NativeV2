@@ -26,6 +26,50 @@ class CourseRepository(BaseRepository[Course]):
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def list_by_teacher(
+        self,
+        teacher_id: uuid.UUID,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> tuple[list[Course], int]:
+        """Return courses where the teacher owns a commission OR courses with no commissions yet."""
+        from sqlalchemy import func, distinct, exists, or_
+
+        has_own_commission = (
+            exists()
+            .where(
+                Commission.course_id == Course.id,
+                Commission.teacher_id == teacher_id,
+                Commission.is_active.is_(True),
+            )
+        )
+        has_no_commissions = (
+            ~exists().where(
+                Commission.course_id == Course.id,
+                Commission.is_active.is_(True),
+            )
+        )
+
+        base = (
+            select(Course)
+            .where(
+                Course.is_active.is_(True),
+                or_(has_own_commission, has_no_commissions),
+            )
+        )
+
+        count_stmt = select(func.count()).select_from(base.subquery())
+        total: int = (await self._session.execute(count_stmt)).scalar_one()
+
+        stmt = (
+            base
+            .order_by(Course.created_at.desc())
+            .offset((page - 1) * per_page)
+            .limit(per_page)
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all()), total
+
 
 class CommissionRepository(BaseRepository[Commission]):
     def __init__(self, session: AsyncSession) -> None:

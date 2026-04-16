@@ -19,9 +19,14 @@ _MAX_RETRIES = 5
 # Mapping from event_type prefix → Redis stream name
 _STREAM_ROUTING: dict[str, str] = {
     "submission": "events:submissions",
+    "reads": "events:submissions",  # reads_problem → submissions stream
+    "reflection": "events:submissions",
+    "exercise": "events:submissions",  # exercise.submitted → submissions stream
     "tutor": "events:tutor",
     "code": "events:code",
     "cognitive": "events:cognitive",
+    "guardrail": "events:tutor",  # guardrail.triggered → tutor stream
+    "governance": "events:tutor",  # governance flags route to the tutor stream
 }
 
 

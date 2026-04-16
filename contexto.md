@@ -1,13 +1,13 @@
-# Contexto de Contratos — EPICs 01-10
+# Contexto de Contratos — EPICs 01-13
 
 > Resumen de todo lo implementado hasta ahora para que la próxima sesión no tenga que leer 50 archivos.
-> Última actualización: 2026-04-14 (post-apply EPIC-10)
+> Última actualización: 2026-04-15 (post-apply EPIC-13)
 
 ---
 
 ## Estado General
 
-EPICs 01-10 implementadas. EPIC-10 aplicada, pendiente de verify+archive.
+EPICs 01-13 implementadas y archivadas. EPIC-14 es la siguiente.
 
 | EPIC | Fase | Estado |
 |------|------|--------|
@@ -21,7 +21,11 @@ EPICs 01-10 implementadas. EPIC-10 aplicada, pendiente de verify+archive.
 | 07 — Sandbox Ejecución | 1 | Archivada |
 | 08 — Submissions + Snapshots | 1 | Archivada |
 | 09 — Chat Streaming Tutor | 2 | Archivada |
-| **10 — Prompt Engine + Guardrails** | **2** | **Aplicada** |
+| 10 — Prompt Engine + Guardrails | 2 | Archivada |
+| 11 — N4 Classifier + Governance | 2 | Archivada |
+| 12 — Reflexión Post-Ejercicio | 2 | Archivada |
+| 13 — Event Classifier + CTR Builder | 3 | Archivada |
+| **14 — Cognitive Metrics Engine** | **3** | **Siguiente** |
 
 ---
 
@@ -151,11 +155,16 @@ Eventos se escriben a `event_outbox` en la misma TX de DB. `OutboxWorker` los pu
 | Prefix del event_type | Stream |
 |----------------------|--------|
 | `submission` | events:submissions |
+| `reads` | events:submissions |
+| `reflection` | events:submissions |
+| `exercise` | events:submissions |
 | `tutor` | events:tutor |
+| `guardrail` | events:tutor |
+| `governance` | events:tutor |
 | `code` | events:code |
 | `cognitive` | events:cognitive |
 
-**⚠ GAP conocido**: `reads_problem` tiene prefix `reads` que NO matchea ningún routing. Arreglar antes de EPIC-13.
+**GAP `reads_problem` ARREGLADO** en esta sesión (EPIC-13).
 
 ### Eventos producidos hasta ahora
 
@@ -170,7 +179,14 @@ Eventos se escriben a `event_outbox` en la misma TX de DB. `OutboxWorker` los pu
 | `tutor.interaction.completed` | EPIC-09 | events:tutor | interaction_id, student_id, exercise_id, session_id, role, n4_classification, prompt_hash, tokens_used |
 | `tutor.session.ended` | EPIC-09 | events:tutor | student_id, exercise_id, session_id, message_count |
 
-*reads_problem tiene bug de routing — ver GAP arriba.
+Nuevos eventos (EPICs 10-13):
+
+| Evento | Productor | Stream | Payload clave |
+|--------|-----------|--------|---------------|
+| `guardrail.triggered` | EPIC-10 | events:tutor | interaction_id, student_id, exercise_id, violation_type, violation_details |
+| `cognitive.classified` | EPIC-11 | events:cognitive | interaction_id, n4_level, sub_classification, student_id, exercise_id |
+| `governance.flag.raised` | EPIC-11 | events:tutor | event_type, actor_id, target_type, details |
+| `reflection.submitted` | EPIC-12 | events:submissions | student_id, reflection_id, activity_submission_id, difficulty_perception, confidence_level |
 
 ---
 
@@ -274,9 +290,14 @@ Factory en router: `_create_llm_adapter()` devuelve MistralAdapter o AnthropicAd
 1. **mistralai v2.3.2**: import es `from mistralai.client import Mistral`, NO `from mistralai import Mistral`
 2. **CurrentUser + require_role**: NUNCA `current_user: CurrentUser = require_role(...)`. Usar `_user=require_role(...)` como param separado
 3. **Docker .env**: espacios al inicio de las líneas se ignoran silenciosamente
-4. **Prompt activo**: solo hay 1 prompt seeded (`socratic_tutor_basic_v1`). No hay lógica para desactivar los otros al activar uno nuevo
+4. **Prompt activo**: v2 activo (`socratic_tutor_contextual_v2`), v1 desactivado. Seed desactiva anteriores.
 5. **Reconnect WS**: el frontend NO carga historial via REST al reconectar (warning del verify)
-6. **reads_problem routing**: el outbox worker no routea este evento correctamente (prefix `reads` no existe en `_STREAM_ROUTING`)
+6. ~~**reads_problem routing**~~: ARREGLADO — prefix `reads` agregado a `_STREAM_ROUTING`
+7. **SQLAlchemy Enum + Alembic**: cognitive_sessions.status usa VARCHAR(20), NO PostgreSQL ENUM. El SAEnum causaba DuplicateObjectError al migrar. Arreglado usando String(20) en modelo y migration.
+8. **Test helpers SQLAlchemy**: usar `MagicMock(spec=Model)` para crear objetos fake, NO `Model.__new__()` que falla por instrumentación de mapped attributes.
+9. **N4Classifier regex typo**: "ag reg" fue corregido a "agreg" en EPIC-11 verify.
+10. **rate_limiter tests**: 2 tests pre-existentes fallan en test_rate_limiter.py (no relacionados con EPICs 10-13)
+11. **Consumer Redis**: usa `decode_responses=False` para bytes crudos de XREADGROUP. El EventBus wrappea payloads en campo `data` JSON string.
 
 ---
 
@@ -308,3 +329,154 @@ Modificar `TutorService.chat()` en `app/features/tutor/service.py`:
 ### Tests críticos
 - 20+ tests adversarios (jailbreak, pedir solución directa, pedir código completo)
 - Tests de ContextBuilder con distintos estados (sin código, con código, con historial largo)
+
+---
+
+## EPIC-10 — Prompt Engine + Guardrails (IMPLEMENTADA)
+
+### Archivos creados/modificados
+| Archivo | Qué hace |
+|---------|----------|
+| `tutor/context_builder.py` | ContextBuilder — compone prompt con ejercicio + rubrica + codigo alumno + actividad |
+| `tutor/guardrails.py` | GuardrailsProcessor — detecta codigo excesivo (>5 lineas), soluciones directas, respuestas no-socraticas |
+| `tutor/n4_classifier.py` | N4Classifier — clasifica por nivel cognitivo (EPIC-11) |
+| `tutor/service.py` | Integra ContextBuilder (pre-LLM) + GuardrailsProcessor (post-stream) + N4Classifier |
+| `tutor/seed.py` | Prompt v2 con placeholders dinámicos, desactiva v1 |
+| `tutor/schemas.py` | ChatGuardrailOut para mensaje de corrección |
+| `tutor/router.py` | Envía ChatGuardrailOut + catch NotFoundError |
+
+### Pipeline del chat actualizado
+```
+mensaje → rate limit → ContextBuilder(ejercicio+rubrica+codigo) → LLM stream
+→ GuardrailsProcessor → N4Classifier(user+assistant) → persist(con n4_level)
+→ outbox(cognitive.classified × 2 + guardrail si aplica + governance event)
+```
+
+### Prompt v2 activo
+`socratic_tutor_contextual_v2` con placeholders: `{exercise_title}`, `{exercise_description}`, `{exercise_difficulty}`, `{exercise_topics}`, `{exercise_language}`, `{exercise_rubric}`, `{student_code}`, `{activity_title}`, `{activity_description}`. Rubrica/actividad se stripean si no existen.
+
+### Guardrails config
+`guardrails_config: {"max_code_lines": 5}` en TutorSystemPrompt.guardrails_config JSONB. Configurable sin redeploy.
+
+### Frontend
+- `tutor/types.ts`: GuardrailViolationType, chat.guardrail en WSIncoming
+- `tutor/hooks/useWebSocketTutor.ts`: case chat.guardrail → addMessage con isGuardrail
+- `tutor/components/ChatMessage.tsx`: burbuja guardrail con borde amber, "Nota pedagogica"
+
+---
+
+## EPIC-11 — N4 Classifier + Governance Events (IMPLEMENTADA)
+
+### Archivos creados/modificados
+| Archivo | Qué hace |
+|---------|----------|
+| `tutor/n4_classifier.py` | Regex patterns N4→N3→N2→N1 para user y assistant. Sub-clasificación: critical/dependent/exploratory |
+| `governance/models.py` | GovernanceEvent: event_type VARCHAR(100), actor_id, target_type/id, details JSONB |
+| `governance/service.py` | record_event, record_guardrail_violation, record_prompt_created/activated/deactivated |
+| `governance/repositories.py` | list_events con paginación + filtro por event_type |
+| `governance/router.py` | GET /api/v1/governance/events (admin only) |
+| `governance/schemas.py` | GovernanceEventResponse, GovernanceEventsListResponse |
+| `alembic/versions/010_*.py` | Migration governance_events |
+
+### N4 Classification
+- N1 (comprensión): "no entiendo", "que tengo que hacer"
+- N2 (estrategia): "como hago para", "deberia usar"
+- N3 (validación): "por que da error", "no funciona"
+- N4 (interacción IA): "esta bien mi solucion", "que opinas"
+- Default: N1. Sub: critical (trabado) / dependent (confirma todo) / exploratory (default)
+
+### Governance event_types
+`prompt.created`, `prompt.activated`, `prompt.deactivated`, `guardrail.triggered`, `course.created`, `enrollment.bulk_created`
+
+---
+
+## EPIC-12 — Reflexión Post-Ejercicio (IMPLEMENTADA)
+
+### Archivos creados/modificados
+| Archivo | Qué hace |
+|---------|----------|
+| `submissions/models.py` | Reflection model: activity_submission_id UNIQUE FK, difficulty_perception 1-5, strategy_description, ai_usage_evaluation, what_would_change, confidence_level 1-5 |
+| `submissions/services.py` | ReflectionService: create_reflection (validación ownership + unicidad), get_reflection |
+| `submissions/schemas.py` | CreateReflectionRequest, ReflectionResponse |
+| `submissions/router.py` | POST + GET /api/v1/submissions/{id}/reflection |
+| `alembic/versions/011_*.py` | Migration reflections table |
+| `frontend/submissions/ReflectionForm.tsx` | Formulario guiado 5 campos, validación, skip link |
+| `frontend/submissions/ReflectionView.tsx` | Vista read-only con Card pattern |
+| `frontend/activities/StudentActivityViewPage.tsx` | Integración: submit → ReflectionForm → confirmación |
+
+### Flujo frontend
+1. Alumno envía actividad → aparece ReflectionForm (no redirect inmediato)
+2. Llena los 5 campos (o skip) → confirmación "Actividad enviada"
+3. Si revisita → ReflectionView read-only
+
+---
+
+## EPIC-13 — Event Classifier + CTR Builder (IMPLEMENTADA)
+
+### Archivos creados/modificados
+| Archivo | Qué hace |
+|---------|----------|
+| `cognitive/models.py` | CognitiveSession (student_id, exercise_id, commission_id, genesis_hash, session_hash, status open/closed/invalidated) + CognitiveEvent (session_id FK, event_type, sequence_number, payload, previous_hash, event_hash) — INMUTABLE |
+| `cognitive/classifier.py` | CognitiveEventClassifier: mapea raw → canónico + N4 level |
+| `cognitive/ctr_builder.py` | compute_genesis_hash, compute_event_hash, verify_chain |
+| `cognitive/service.py` | CognitiveService: get_or_create_session, add_event (hash chain), close_session, verify_session |
+| `cognitive/repositories.py` | CognitiveSessionRepo (get_open_session, get_stale_sessions), CognitiveEventRepo (get_last_event) |
+| `cognitive/consumer.py` | CognitiveEventConsumer: XREADGROUP sobre 3 streams, consumer group cognitive-group |
+| `cognitive/router.py` | GET /api/v1/cognitive/sessions/{id} + GET .../verify |
+| `cognitive/schemas.py` | CognitiveSessionResponse, CognitiveEventResponse, VerifyResponse |
+| `alembic/versions/012_*.py` | Migration cognitive_sessions + cognitive_events |
+
+### Transformación de eventos raw → canónicos
+| Raw (Event Bus) | Canónico (CTR) | N4 |
+|-----------------|----------------|----|
+| reads_problem | reads_problem | N1 |
+| code.snapshot.captured | code.snapshot | N1 |
+| code.executed | code.run | N3 |
+| code.execution.failed | code.run | N3 |
+| exercise.submitted | submission.created | N2 |
+| tutor.interaction.completed (user) | tutor.question_asked | N4 |
+| tutor.interaction.completed (assistant) | tutor.response_received | N4 |
+| tutor.session.started | session.started | — |
+| tutor.session.ended | session.closed | — |
+| reflection.submitted | reflection.submitted | N1 |
+
+### Hash chain SHA-256
+- genesis_hash = SHA256("GENESIS:" + session_id + ":" + started_at_iso)
+- event_hash(n) = SHA256(previous_hash + ":" + event_type + ":" + sorted_json(payload) + ":" + timestamp_iso)
+- session_hash = último event_hash al cerrar
+- Verificable via endpoint GET /api/v1/cognitive/sessions/{id}/verify
+
+### Ciclo de vida de sesión
+- **Creación**: al primer evento para (student_id, exercise_id) sin sesión open
+- **Cierre**: por exercise.submitted o timeout 30 min de inactividad
+- **Invalidación**: si verify_chain detecta hash mismatch
+
+### Consumer Redis Streams
+- Consumer group: `cognitive-group`
+- Streams: events:submissions, events:tutor, events:code
+- Corre como asyncio task en app lifespan
+- Timeout checker cada 5 min cierra sesiones inactivas
+
+---
+
+## Para EPIC-14 específicamente
+
+### Qué crear
+- `CognitiveMetrics` model en schema cognitive (n1-n4 scores, qe, dependency, reflection_score, risk_level)
+- `CognitiveMetricsWorker` que calcula métricas al cierre de sesión
+- `RiskAssessment` model en schema analytics
+- `EvaluationEngine` con función E = f(N1, N2, N3, N4, Qe)
+
+### Qué consumir
+- `cognitive_sessions` (cerradas) con sus `cognitive_events`
+- `reflections` (para reflection_score)
+- Clasificaciones N4 de los eventos
+
+### Qué producir
+- Métricas agregadas por sesión
+- Risk assessments por alumno
+- Datos para dashboard docente (EPIC-16)
+
+### Referencia
+- `epics/EPIC-14.md`
+- `knowledge-base/02-arquitectura/02_modelo_de_datos.md` (analytics schema)

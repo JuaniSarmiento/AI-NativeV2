@@ -27,14 +27,11 @@ from app.shared.db.base import Base  # noqa: E402
 # Operational schema models
 from app.shared.models.commission import Commission  # noqa: E402, F401
 from app.shared.models.course import Course  # noqa: E402, F401
-from app.shared.models.enrollment import Enrollment  # noqa: E402, F401
 from app.shared.models.event_outbox import EventOutbox  # noqa: E402, F401
-from app.shared.models.exercise import Exercise  # noqa: E402, F401
-from app.shared.models.activity import Activity  # noqa: E402, F401
-from app.shared.models.llm_config import LLMConfig  # noqa: E402, F401
 from app.shared.models.user import User  # noqa: E402, F401
-from app.features.submissions.models import Submission, CodeSnapshot, ActivitySubmission  # noqa: E402, F401
-from app.features.tutor.models import TutorInteraction, TutorSystemPrompt  # noqa: E402, F401
+from app.shared.models.user import User  # noqa: E402, F401
+from app.shared.models.course import Course  # noqa: E402, F401
+from app.shared.models.commission import Commission  # noqa: E402, F401
 
 target_metadata = Base.metadata
 

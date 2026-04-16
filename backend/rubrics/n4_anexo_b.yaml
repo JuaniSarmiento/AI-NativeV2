@@ -1,0 +1,36 @@
+# N4 Evaluation Rubric — Anexo B
+# Used by MetricsEngine to compute cognitive metrics
+# Version: 1.0.0
+# Governance level: MEDIUM — changes require checkpoint review
+
+weights:
+  n1_comprehension: 0.15
+  n2_strategy: 0.25
+  n3_validation: 0.25
+  n4_ai_interaction: 0.20
+  qe: 0.15
+
+risk_thresholds:
+  critical:
+    dependency_score_min: 0.7
+    n4_score_max: 30
+  high:
+    dependency_score_min: 0.5
+    any_n_score_max: 20
+  medium:
+    any_n_score_max: 40
+    qe_score_max: 40
+
+quality_factors:
+  n1:
+    events: ["reads_problem", "code.snapshot"]
+    min_engagement_seconds: 10
+  n2:
+    events: ["submission.created"]
+    requires_prior: ["code.run"]
+  n3:
+    events: ["code.run"]
+    requires_correction: true
+  n4:
+    events: ["tutor.question_asked"]
+    dependency_penalty: 0.3

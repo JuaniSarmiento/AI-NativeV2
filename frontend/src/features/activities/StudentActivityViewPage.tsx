@@ -8,6 +8,8 @@ import Button from '@/shared/components/Button';
 import Card from '@/shared/components/Card';
 import Modal from '@/shared/components/Modal';
 import TutorChat from '@/features/tutor/components/TutorChat';
+import ReflectionForm from '@/features/submissions/ReflectionForm';
+import ReflectionView from '@/features/submissions/ReflectionView';
 import type { ExerciseDifficulty } from '@/features/exercises/types';
 
 const DIFFICULTY_COLORS: Record<ExerciseDifficulty, { bg: string; text: string }> = {
@@ -40,6 +42,11 @@ export default function StudentActivityViewPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [showReflectionForm, setShowReflectionForm] = useState(false);
+  const [reflectionDone, setReflectionDone] = useState(false);
+  const [existingReflection, setExistingReflection] = useState<any>(null);
+  const [latestSubmissionId, setLatestSubmissionId] = useState<string | null>(null);
+  const [gradeData, setGradeData] = useState<any>(null);
 
   // Hooks must be called before any early return
   const activeExercises = (activity?.exercises ?? []).filter((e) => e.is_active);
@@ -50,12 +57,28 @@ export default function StudentActivityViewPage() {
   useEffect(() => {
     if (activityId) {
       fetchActivity(activityId);
-      // Check if already submitted
+      // Check if already submitted + load reflection + grade
       apiClient
         .get<any[]>(`/v1/student/activities/${activityId}/submissions`)
         .then((res) => {
           const subs = Array.isArray(res.data) ? res.data : [];
-          if (subs.length > 0) setSubmitted(true);
+          if (subs.length > 0) {
+            setSubmitted(true);
+            const latest = subs[0];
+            const subId = latest.id;
+            setLatestSubmissionId(subId);
+            // If evaluated, set grade data
+            if (latest.status === 'evaluated') {
+              setGradeData(latest);
+            }
+            // Try to load existing reflection
+            apiClient
+              .get(`/v1/submissions/${subId}/reflection`)
+              .then((refRes: any) => {
+                if (refRes.data) setExistingReflection(refRes.data);
+              })
+              .catch(() => {});
+          }
         })
         .catch(() => {});
     }
@@ -107,13 +130,16 @@ export default function StudentActivityViewPage() {
         exercise_id: ex.id,
         code: codes[ex.id] || ex.starter_code || '',
       }));
-      await apiClient.post(`/v1/student/activities/${activityId}/submit`, {
+      const res = await apiClient.post<any>(`/v1/student/activities/${activityId}/submit`, {
         exercises: exercisesPayload,
       });
       setSubmitModalOpen(false);
       setSubmitted(true);
-      // Redirect to activities list after short delay
-      setTimeout(() => navigate('/actividades'), 1500);
+      // Get the submission ID for reflection
+      const subId = res.data?.id;
+      if (subId) setLatestSubmissionId(subId);
+      // Show reflection form instead of redirecting
+      setShowReflectionForm(true);
     } catch {
       // Error handling
     } finally {
@@ -137,8 +163,89 @@ export default function StudentActivityViewPage() {
     );
   }
 
-  // Already submitted — show confirmation instead of editor
+  // Already submitted — show grade, reflection form, or confirmation
   if (submitted && !submitting) {
+    // PRIORITY 1: If graded, show the grade (most important info for the student)
+    if (gradeData) {
+      return (
+        <div className="py-8 animate-[slideIn_400ms_cubic-bezier(0.32,0.72,0,1)]">
+          <div className="mx-auto max-w-2xl space-y-6">
+            <div className="text-center">
+              <span className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-[var(--color-success-100)]">
+                <span className="text-[1.5rem] font-bold text-[var(--color-success-700)]">
+                  {gradeData.total_score}
+                </span>
+              </span>
+              <h1 className="mt-4 text-[1.5rem] font-bold tracking-tight text-[var(--color-text-primary)]">
+                Actividad Corregida
+              </h1>
+              <p className="mt-1 text-[1.125rem] font-semibold tabular-nums text-[var(--color-text-primary)]">
+                Nota general: {gradeData.total_score}/100
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              {(gradeData.submissions ?? []).map((sub: any, idx: number) => (
+                <div key={sub.id} className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[0.875rem] font-medium text-[var(--color-text-primary)]">
+                      Ejercicio {idx + 1}
+                    </span>
+                    <span className="text-[1rem] font-bold tabular-nums text-[var(--color-text-primary)]">
+                      {sub.score !== null ? `${sub.score}/100` : 'Pendiente'}
+                    </span>
+                  </div>
+                  {sub.feedback && (
+                    <p className="mt-2 text-[0.8125rem] leading-relaxed text-[var(--color-text-secondary)]">
+                      {sub.feedback}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="text-center">
+              <Link to="/actividades">
+                <Button variant="secondary" size="md">
+                  Volver a actividades
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // PRIORITY 2: Show reflection form after fresh submit
+    if (showReflectionForm && latestSubmissionId && !reflectionDone) {
+      return (
+        <div className="py-8">
+          <ReflectionForm
+            activitySubmissionId={latestSubmissionId}
+            onComplete={() => setReflectionDone(true)}
+            onSkip={() => setReflectionDone(true)}
+          />
+        </div>
+      );
+    }
+
+    // PRIORITY 3: Show existing reflection (revisiting, not yet graded)
+    if (existingReflection && !reflectionDone && !showReflectionForm) {
+      return (
+        <div className="py-8">
+          <ReflectionView reflection={existingReflection} />
+          <div className="mt-6 text-center">
+            <Link to="/actividades">
+              <Button variant="secondary" size="md">
+                Volver a actividades
+              </Button>
+            </Link>
+          </div>
+        </div>
+      );
+    }
+
+    // Final confirmation — pending message (grade case handled above)
     return (
       <div className="py-16 text-center animate-[slideIn_400ms_cubic-bezier(0.32,0.72,0,1)]">
         <span className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-[#EDF3EC]">

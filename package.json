@@ -1,0 +1,26 @@
+{
+  "name": "ai-native",
+  "version": "1.0.0",
+  "description": "Sistema pedagógico-tecnológico para enseñanza de programación universitaria con trazabilidad cognitiva N4. FastAPI + React 19 + PostgreSQL + Redis.",
+  "main": "index.js",
+  "scripts": {
+    "test": "npx playwright test",
+    "test:e2e": "npx playwright test",
+    "test:e2e:headed": "npx playwright test --headed"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JuaniSarmiento/AI-NativeV2.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/JuaniSarmiento/AI-NativeV2/issues"
+  },
+  "homepage": "https://github.com/JuaniSarmiento/AI-NativeV2#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
+  }
+}

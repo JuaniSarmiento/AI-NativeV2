@@ -29,13 +29,13 @@ describe('App', () => {
   it('renders without crashing', async () => {
     render(<App />);
 
-    // Unauthenticated users are redirected to /login
-    expect(await screen.findByText(/credenciales para continuar/i)).toBeInTheDocument();
+    // Unauthenticated users are redirected to /login.
+    expect(await screen.findByText('Iniciá sesión para continuar')).toBeInTheDocument();
   });
 
   it('renders the login page at root path when unauthenticated', async () => {
     render(<App />);
 
-    expect(await screen.findByRole('button', { name: /Continuar/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Iniciar sesión' })).toBeInTheDocument();
   });
 });

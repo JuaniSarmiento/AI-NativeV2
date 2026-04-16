@@ -23,24 +23,24 @@ export const navItems: NavItem[] = [
     roles: ['alumno'],
   },
   {
+    path: '/student/progress',
+    label: 'Mi Progreso',
+    roles: ['alumno'],
+  },
+  {
     path: '/courses',
     label: 'Cursos',
-    roles: ['docente', 'admin'],
-  },
-  {
-    path: '/students',
-    label: 'Alumnos',
-    roles: ['docente', 'admin'],
-  },
-  {
-    path: '/reports',
-    label: 'Reportes',
     roles: ['docente', 'admin'],
   },
   {
     path: '/settings',
     label: 'Configuracion',
     roles: ['docente', 'admin'],
+  },
+  {
+    path: '/admin/governance',
+    label: 'Gobernanza',
+    roles: ['admin'],
   },
 ];
 

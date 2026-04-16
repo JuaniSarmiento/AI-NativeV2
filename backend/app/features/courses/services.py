@@ -34,6 +34,11 @@ class CourseService:
     async def list(self, page: int = 1, per_page: int = 20) -> tuple[list[Course], int]:
         return await self._repo.list(page=page, per_page=per_page)
 
+    async def list_by_teacher(
+        self, teacher_id: uuid.UUID, page: int = 1, per_page: int = 20
+    ) -> tuple[list[Course], int]:
+        return await self._repo.list_by_teacher(teacher_id, page=page, per_page=per_page)
+
     async def update(self, course_id: uuid.UUID, data: dict[str, Any]) -> Course:
         if "name" in data and data["name"]:
             existing = await self._repo.get_by_name(data["name"])

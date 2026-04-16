@@ -32,12 +32,26 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 _event_bus: EventBus | None = None
 _outbox_task: asyncio.Task[None] | None = None
+_cognitive_consumer_task: asyncio.Task[None] | None = None
+_cognitive_timeout_task: asyncio.Task[None] | None = None
+_cognitive_redis = None  # type: ignore[type-arg]
 
 
 def get_event_bus() -> EventBus:
     if _event_bus is None:
         raise RuntimeError("EventBus not initialised — app startup not complete.")
     return _event_bus
+
+
+async def _build_cognitive_redis(redis_url: str):  # type: ignore[return]
+    """Create a dedicated async Redis client for the CognitiveEventConsumer.
+
+    The consumer requires decode_responses=False so it can handle both
+    bytes and str payloads from XREADGROUP gracefully.
+    """
+    import redis.asyncio as aioredis
+
+    return aioredis.from_url(redis_url, decode_responses=False)
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +61,7 @@ def get_event_bus() -> EventBus:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # type: ignore[type-arg]
-    global _event_bus, _outbox_task  # noqa: PLW0603
+    global _event_bus, _outbox_task, _cognitive_consumer_task, _cognitive_timeout_task, _cognitive_redis  # noqa: PLW0603
 
     settings = get_settings()
     logger.info(
@@ -74,17 +88,35 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     _outbox_task = asyncio.create_task(worker.run(interval=5.0))
     logger.info("OutboxWorker task started")
 
+    # --- Cognitive event consumer (Fase 3 — CTR builder) ---
+    from app.features.cognitive.consumer import CognitiveEventConsumer, run_timeout_checker
+
+    _cognitive_redis = await _build_cognitive_redis(settings.redis_url)  # noqa: PLW0603
+    cognitive_consumer = CognitiveEventConsumer(
+        redis=_cognitive_redis,
+        session_factory=get_session_factory(),
+    )
+    _cognitive_consumer_task = asyncio.create_task(cognitive_consumer.start())
+    _cognitive_timeout_task = asyncio.create_task(
+        run_timeout_checker(session_factory=get_session_factory())
+    )
+    logger.info("CognitiveEventConsumer and timeout checker tasks started")
+
     yield
 
     # --- Shutdown ---
     logger.info("Shutting down AI-Native backend")
 
-    if _outbox_task is not None:
-        _outbox_task.cancel()
-        try:
-            await _outbox_task
-        except asyncio.CancelledError:
-            pass
+    for task in (_outbox_task, _cognitive_consumer_task, _cognitive_timeout_task):
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    if _cognitive_redis is not None:
+        await _cognitive_redis.aclose()
 
     if _event_bus is not None:
         await _event_bus.close()
@@ -260,6 +292,10 @@ def _register_routers(app: FastAPI) -> None:
     from app.features.sandbox.router import router as sandbox_router
     from app.features.submissions.router import router as submissions_router
     from app.features.tutor.router import router as tutor_router
+    from app.features.governance.router import router as governance_router
+    from app.features.cognitive.router import router as cognitive_router
+    from app.features.evaluation.router import router as evaluation_router
+    from app.features.risk.router import router as risk_router
 
     app.include_router(auth_router)
     app.include_router(courses_router)
@@ -268,3 +304,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(sandbox_router)
     app.include_router(submissions_router)
     app.include_router(tutor_router)
+    app.include_router(governance_router)
+    app.include_router(cognitive_router)
+    app.include_router(evaluation_router)
+    app.include_router(risk_router)

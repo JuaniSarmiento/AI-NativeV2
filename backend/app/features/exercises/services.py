@@ -40,6 +40,29 @@ class ExerciseService:
         """Get exercise detail and emit reads_problem event for cognitive tracing."""
         exercise = await self._repo.get_by_id(exercise_id)
 
+        # Resolve commission_id from enrollment
+        commission_id = "00000000-0000-0000-0000-000000000000"
+        try:
+            from sqlalchemy import select
+            from app.shared.models.enrollment import Enrollment
+            from app.shared.models.commission import Commission
+
+            enr_result = await self._session.execute(
+                select(Enrollment)
+                .join(Commission, Commission.id == Enrollment.commission_id)
+                .where(
+                    Enrollment.student_id == student_id,
+                    Enrollment.is_active.is_(True),
+                    Commission.course_id == exercise.course_id,
+                )
+                .limit(1)
+            )
+            enr = enr_result.scalar_one_or_none()
+            if enr:
+                commission_id = str(enr.commission_id)
+        except Exception:
+            pass
+
         # Emit reads_problem event
         outbox_event = EventOutbox(
             event_type="reads_problem",
@@ -47,6 +70,7 @@ class ExerciseService:
                 "student_id": str(student_id),
                 "exercise_id": str(exercise_id),
                 "course_id": str(exercise.course_id),
+                "commission_id": commission_id,
                 "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             },
         )

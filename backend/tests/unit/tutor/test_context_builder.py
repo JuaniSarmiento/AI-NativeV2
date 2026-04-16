@@ -39,7 +39,7 @@ def _make_exercise(
     ex.description = description
     ex.difficulty = MagicMock()
     ex.difficulty.value = difficulty_value
-    ex.topic_tags = topic_tags or ["listas", "bucles"]
+    ex.topic_tags = topic_tags if topic_tags is not None else ["listas", "bucles"]
     ex.language = language
     ex.starter_code = starter_code
     ex.rubric = rubric

@@ -160,6 +160,14 @@ export default function CourseDetailPage() {
                     Activa
                   </span>
                 </div>
+                {canManage && (
+                  <Link
+                    to={`/teacher/courses/${courseId}/dashboard?commission=${c.id}`}
+                    className="mt-3 inline-block text-[0.75rem] font-medium text-[var(--color-accent-600)] transition-colors hover:text-[var(--color-accent-700)]"
+                  >
+                    Ver Dashboard Cognitivo
+                  </Link>
+                )}
               </Card>
             ))}
           </div>
@@ -227,10 +235,22 @@ export default function CourseDetailPage() {
                         </p>
                       )}
                     </div>
-                    <div className="flex items-center gap-2 shrink-0 ml-4">
+                    <div className="flex items-center gap-3 shrink-0 ml-4">
                       <span className="text-[0.75rem] font-mono text-[var(--color-text-tertiary)]">
                         {a.exercises?.length ?? 0} ej.
                       </span>
+                      {canManage && a.status === 'published' && (
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            navigate(`/teacher/activities/${a.id}/grading`);
+                          }}
+                          className="rounded-[var(--radius-md)] border border-[var(--color-border)] px-3 py-1 text-[0.6875rem] font-medium text-[var(--color-accent-600)] transition-colors hover:bg-[var(--color-accent-50)] dark:hover:bg-[var(--color-accent-900)]/10"
+                        >
+                          Corregir
+                        </button>
+                      )}
                       <svg className="h-4 w-4 text-[var(--color-text-tertiary)]" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
                       </svg>

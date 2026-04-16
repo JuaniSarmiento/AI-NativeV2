@@ -83,6 +83,21 @@ class LLMAdapter(abc.ABC):
         """Token usage from the most recent completed stream."""
         ...  # pragma: no cover
 
+    async def complete(
+        self,
+        messages: list[ChatMessage],
+        system_prompt: str,
+        *,
+        max_tokens: int | None = None,
+    ) -> StreamResult:
+        """Non-streaming completion. Default: collect stream tokens."""
+        parts: list[str] = []
+        async for token in self.stream_response(messages, system_prompt, max_tokens=max_tokens):
+            parts.append(token)
+        text = "".join(parts)
+        usage = self.last_usage or LLMUsage(input_tokens=0, output_tokens=0)
+        return StreamResult(text=text, usage=usage)
+
     @property
     @abc.abstractmethod
     def model_name(self) -> str:

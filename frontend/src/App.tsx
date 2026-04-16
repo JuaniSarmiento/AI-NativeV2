@@ -13,6 +13,12 @@ import ActivityDetailPage from '@/features/activities/ActivityDetailPage';
 import StudentActivitiesPage from '@/features/activities/StudentActivitiesPage';
 import StudentActivityViewPage from '@/features/activities/StudentActivityViewPage';
 import SettingsLLMPage from '@/features/activities/SettingsLLMPage';
+import TeacherDashboard from '@/features/teacher/dashboard/TeacherDashboard';
+import TracePage from '@/features/teacher/trace/TracePage';
+import ExercisePatternsPage from '@/features/teacher/patterns/ExercisePatternsPage';
+import GovernanceReportsPage from '@/features/teacher/governance/GovernanceReportsPage';
+import GradingPage from '@/features/teacher/grading/GradingPage';
+import StudentProgress from '@/features/student/progress/StudentProgress';
 
 /* ---------------------------------------------------------------
    Placeholder pages — replaced by real features in future EPICs
@@ -106,6 +112,12 @@ export default function App() {
           <Route path="actividades/:activityId" element={<StudentActivityViewPage />} />
           <Route path="activities/:activityId" element={<ActivityDetailPage />} />
           <Route path="exercises/:exerciseId" element={<ExerciseDetailPage />} />
+          <Route path="teacher/courses/:courseId/dashboard" element={<TeacherDashboard />} />
+          <Route path="teacher/trace/:sessionId" element={<TracePage />} />
+          <Route path="teacher/courses/:courseId/exercises/:exerciseId/patterns" element={<ExercisePatternsPage />} />
+          <Route path="teacher/activities/:activityId/grading" element={<GradingPage />} />
+          <Route path="admin/governance" element={<GovernanceReportsPage />} />
+          <Route path="student/progress" element={<StudentProgress />} />
           <Route path="students" element={<PlaceholderPage title="Alumnos" />} />
           <Route path="reports" element={<PlaceholderPage title="Reportes" />} />
           <Route path="settings" element={<SettingsLLMPage />} />

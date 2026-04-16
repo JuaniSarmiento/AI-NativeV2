@@ -25,7 +25,8 @@ async def _verify_enrollment(
     session: AsyncSession,
     student_id: uuid.UUID,
     exercise: Exercise,
-) -> None:
+) -> str:
+    """Verify enrollment and return commission_id."""
     result = await session.execute(
         select(Enrollment)
         .join(Commission, Commission.id == Enrollment.commission_id)
@@ -36,10 +37,12 @@ async def _verify_enrollment(
         )
         .limit(1)
     )
-    if result.scalar_one_or_none() is None:
+    enrollment = result.scalar_one_or_none()
+    if enrollment is None:
         raise AuthorizationError(
             message="No estas inscripto en el curso de este ejercicio."
         )
+    return str(enrollment.commission_id)
 
 
 @router.post("/exercises/{exercise_id}/run")
@@ -63,7 +66,7 @@ async def run_code(
         raise NotFoundError(resource="Exercise", identifier=str(exercise_id))
 
     # Verify enrollment
-    await _verify_enrollment(session, current_user.id, exercise)
+    commission_id = await _verify_enrollment(session, current_user.id, exercise)
 
     # Execute code — terminal mode only (no test case evaluation)
     sandbox = SandboxService()
@@ -77,6 +80,7 @@ async def run_code(
             "student_id": str(current_user.id),
             "exercise_id": str(exercise_id),
             "course_id": str(exercise.course_id),
+            "commission_id": commission_id,
             "code": body.code[:5000],
             "language": "python",
             "stdout": exec_result.stdout[:2000],

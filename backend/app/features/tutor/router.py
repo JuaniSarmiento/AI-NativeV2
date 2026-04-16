@@ -268,6 +268,40 @@ async def get_session_messages(
 
 
 # ---------------------------------------------------------------------------
+# REST — teacher access to student chat (EPIC-17)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/v1/teacher/students/{student_id}/exercises/{exercise_id}/messages")
+async def get_teacher_student_messages(
+    student_id: uuid.UUID,
+    exercise_id: uuid.UUID,
+    session: AsyncSession = Depends(get_async_session),
+    _user=require_role("docente", "admin"),
+) -> MessagesListResponse:
+    """Return the last 50 messages of a student's session — for docente/admin trace view."""
+    llm_adapter = _create_llm_adapter()
+    rate_limiter = TutorRateLimiter(await get_redis())
+    service = TutorService(session, llm_adapter, rate_limiter)
+
+    messages = await service.get_messages(student_id, exercise_id, limit=50)
+
+    return MessagesListResponse(
+        data=[
+            MessageResponse(
+                id=str(m.id),
+                session_id=str(m.session_id),
+                role=m.role.value,
+                content=m.content,
+                tokens_used=m.tokens_used,
+                created_at=m.created_at,
+            )
+            for m in messages
+        ],
+    )
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

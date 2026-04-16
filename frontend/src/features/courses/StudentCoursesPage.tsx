@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useCoursesStore } from './store';
 import Button from '@/shared/components/Button';
 import Card from '@/shared/components/Card';
@@ -77,23 +78,28 @@ export default function StudentCoursesPage() {
       ) : (
         <div className="mt-6 grid gap-3 md:grid-cols-2">
           {studentCourses.map((sc, i) => (
-            <Card
-              key={`${sc.commission_id}`}
-              padding="md"
-              className="animate-[slideIn_400ms_cubic-bezier(0.32,0.72,0,1)_both]"
-              style={{ animationDelay: `${i * 60}ms` } as React.CSSProperties}
-            >
-              <p className="text-[0.9375rem] font-semibold text-[var(--color-text-primary)]">
-                {sc.course_name}
-              </p>
-              <div className="mt-2 flex items-center gap-3 text-[0.8125rem] text-[var(--color-text-tertiary)]">
-                <span>{sc.commission_name}</span>
-                <span className="h-1 w-1 rounded-full bg-[var(--color-neutral-300)]" />
-                <span>{sc.teacher_name}</span>
-                <span className="h-1 w-1 rounded-full bg-[var(--color-neutral-300)]" />
-                <span>{sc.year} S{sc.semester}</span>
-              </div>
-            </Card>
+            <Link key={`${sc.commission_id}`} to="/actividades">
+              <Card
+                hoverable
+                padding="md"
+                className="animate-[slideIn_400ms_cubic-bezier(0.32,0.72,0,1)_both]"
+                style={{ animationDelay: `${i * 60}ms` } as React.CSSProperties}
+              >
+                <p className="text-[0.9375rem] font-semibold text-[var(--color-text-primary)]">
+                  {sc.course_name}
+                </p>
+                <div className="mt-2 flex items-center gap-3 text-[0.8125rem] text-[var(--color-text-tertiary)]">
+                  <span>{sc.commission_name}</span>
+                  <span className="h-1 w-1 rounded-full bg-[var(--color-neutral-300)]" />
+                  <span>{sc.teacher_name}</span>
+                  <span className="h-1 w-1 rounded-full bg-[var(--color-neutral-300)]" />
+                  <span>{sc.year} S{sc.semester}</span>
+                </div>
+                <p className="mt-2 text-[0.75rem] font-medium text-[var(--color-accent-600)]">
+                  Ver actividades
+                </p>
+              </Card>
+            </Link>
           ))}
         </div>
       )}
