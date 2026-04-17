@@ -70,3 +70,44 @@ class MistralAdapter:
             max_tokens=kwargs.get("max_tokens", 4096),
         )
         return response.choices[0].message.content or ""
+
+
+class GeminiAdapter:
+    def __init__(self, api_key: str, model: str = "gemini-2.0-flash") -> None:
+        self._api_key = api_key
+        self._model = model
+
+    async def generate(self, messages: list[dict], **kwargs) -> str:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=self._api_key)
+
+        # Gemini separates system instruction from turn-based contents.
+        # Role "assistant" in OpenAI/Anthropic convention maps to "model" in Gemini.
+        system_msg = ""
+        contents: list = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content_text = msg.get("content", "")
+            if role == "system":
+                system_msg = content_text
+                continue
+            gemini_role = "user" if role == "user" else "model"
+            contents.append(
+                types.Content(role=gemini_role, parts=[types.Part(text=content_text)])
+            )
+
+        config_kwargs: dict = {
+            "temperature": kwargs.get("temperature", 0.7),
+            "max_output_tokens": kwargs.get("max_tokens", 4096),
+        }
+        if system_msg:
+            config_kwargs["system_instruction"] = system_msg
+
+        response = await client.aio.models.generate_content(
+            model=self._model,
+            contents=contents,
+            config=types.GenerateContentConfig(**config_kwargs),
+        )
+        return response.text or ""

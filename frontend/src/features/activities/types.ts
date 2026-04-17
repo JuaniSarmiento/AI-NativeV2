@@ -1,5 +1,5 @@
 export type ActivityStatus = 'draft' | 'published';
-export type LLMProvider = 'openai' | 'anthropic' | 'mistral';
+export type LLMProvider = 'openai' | 'anthropic' | 'mistral' | 'gemini';
 
 export interface Activity {
   id: string;

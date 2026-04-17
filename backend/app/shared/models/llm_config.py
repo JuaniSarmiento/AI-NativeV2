@@ -15,6 +15,7 @@ class LLMProvider(str, enum.Enum):
     openai = "openai"
     anthropic = "anthropic"
     mistral = "mistral"
+    gemini = "gemini"
 
 
 class LLMConfig(Base):

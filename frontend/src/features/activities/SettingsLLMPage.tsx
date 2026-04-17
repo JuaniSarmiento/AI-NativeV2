@@ -10,6 +10,7 @@ const PROVIDERS: { value: LLMProvider; label: string; placeholder: string; defau
   { value: 'openai', label: 'OpenAI', placeholder: 'sk-...', defaultModel: 'gpt-4o-mini' },
   { value: 'anthropic', label: 'Anthropic', placeholder: 'sk-ant-...', defaultModel: 'claude-sonnet-4-20250514' },
   { value: 'mistral', label: 'Mistral', placeholder: 'your-mistral-key', defaultModel: 'mistral-small-latest' },
+  { value: 'gemini', label: 'Google Gemini', placeholder: 'AIza...', defaultModel: 'gemini-2.0-flash' },
 ];
 
 export default function SettingsLLMPage() {
@@ -152,7 +153,7 @@ export default function SettingsLLMPage() {
               <label className="block text-[0.8125rem] font-medium text-[var(--color-text-primary)]">
                 Proveedor
               </label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 {PROVIDERS.map((p) => (
                   <button
                     key={p.value}
@@ -195,7 +196,9 @@ export default function SettingsLLMPage() {
                   ? 'Ej: gpt-4o-mini, gpt-4o'
                   : provider === 'anthropic'
                     ? 'Ej: claude-sonnet-4-20250514, claude-haiku-4-5-20251001'
-                    : 'Ej: mistral-small-latest, mistral-medium-latest, mistral-large-latest'
+                    : provider === 'gemini'
+                      ? 'Ej: gemini-2.0-flash, gemini-2.5-pro, gemini-1.5-flash'
+                      : 'Ej: mistral-small-latest, mistral-medium-latest, mistral-large-latest'
               }
             />
 
