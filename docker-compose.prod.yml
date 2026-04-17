@@ -3,8 +3,6 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
-    ports:
-      - "8001:8001"
     depends_on:
       db:
         condition: service_healthy
@@ -31,8 +29,6 @@ services:
       dockerfile: Dockerfile.prod
       args:
         VITE_API_URL: /api
-    ports:
-      - "8081:80"
     depends_on:
       api:
         condition: service_healthy
@@ -42,8 +38,6 @@ services:
 
   db:
     image: pgvector/pgvector:pg16
-    ports:
-      - "5433:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-ainative}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ainative}
@@ -62,8 +56,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6380:6379"
     volumes:
       - redis-data:/data
     command: redis-server --appendonly yes
