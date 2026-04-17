@@ -9,6 +9,7 @@ description = "AI-Native pedagogical platform backend — UTN FRM"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi[standard]>=0.110.0",
+    "gunicorn>=22.0.0",
     "uvicorn[standard]>=0.29.0",
     "sqlalchemy[asyncio]>=2.0.0",
     "asyncpg>=0.29.0",
