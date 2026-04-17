@@ -31,8 +31,8 @@ git checkout "$COMMIT"
 
 # 3. Rebuild and restart
 echo "--- Rebuilding services ---"
-docker compose -f devOps/docker-compose.prod.yml build
-docker compose -f devOps/docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml up -d
 
 # 4. Wait for health
 echo "--- Waiting for API health ---"

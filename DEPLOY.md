@@ -23,10 +23,10 @@ cp env.example .env
 #   DEBUG=false
 
 # 3. Deploy
-docker compose -f devOps/docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 
 # 4. Run migrations
-docker compose -f devOps/docker-compose.prod.yml exec api alembic upgrade head
+docker compose -f docker-compose.prod.yml exec api alembic upgrade head
 
 # 5. Seed initial data
 bash devOps/scripts/seed-production.sh
@@ -65,7 +65,7 @@ bash devOps/scripts/rollback.sh
 bash devOps/scripts/rollback.sh abc1234
 
 # If migration changed, also run:
-docker compose -f devOps/docker-compose.prod.yml exec api alembic downgrade -1
+docker compose -f docker-compose.prod.yml exec api alembic downgrade -1
 ```
 
 ## Monitoring

@@ -246,6 +246,10 @@ def _register_routers(app: FastAPI) -> None:
     health_router = APIRouter(tags=["system"])
 
     @health_router.get("/health", summary="Health check")
+    async def health_check_legacy() -> dict:
+        return {"status": "ok"}
+
+    @health_router.get("/api/v1/health", summary="Health check")
     async def health_check() -> dict:
         return {"status": "ok"}
 

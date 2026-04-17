@@ -20,7 +20,7 @@ echo "[$(date)] Starting backup of $DB_NAME..."
 mkdir -p "$BACKUP_DIR"
 
 # Dump and compress
-docker compose -f devOps/docker-compose.prod.yml exec -T db \
+docker compose -f docker-compose.prod.yml exec -T db \
   pg_dump -U "$DB_USER" "$DB_NAME" | gzip > "$BACKUP_FILE"
 
 echo "[$(date)] Backup created: $BACKUP_FILE ($(du -h "$BACKUP_FILE" | cut -f1))"

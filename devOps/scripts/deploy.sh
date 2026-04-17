@@ -18,8 +18,8 @@ git pull origin master
 
 # 2. Build and restart services
 echo "--- Building and restarting services ---"
-docker compose -f devOps/docker-compose.prod.yml build
-docker compose -f devOps/docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml up -d
 
 # 3. Wait for API to be healthy
 echo "--- Waiting for API health ---"
@@ -35,7 +35,7 @@ done
 
 # 4. Run migrations
 echo "--- Running migrations ---"
-docker compose -f devOps/docker-compose.prod.yml exec -T api alembic upgrade head
+docker compose -f docker-compose.prod.yml exec -T api alembic upgrade head
 
 # 5. Final health check
 echo "--- Final health check ---"

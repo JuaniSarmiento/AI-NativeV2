@@ -77,11 +77,11 @@ nano .env
 
 ```bash
 # Build y levantar
-docker compose -f devOps/docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml up -d --build
 
 # Esperar a que arranque (30 segundos aprox)
 # Verificar que los 4 servicios estan corriendo:
-docker compose -f devOps/docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml ps
 ```
 
 Deberia mostrar 4 servicios: `api`, `frontend`, `db`, `redis` — todos `Up (healthy)`.
@@ -89,7 +89,7 @@ Deberia mostrar 4 servicios: `api`, `frontend`, `db`, `redis` — todos `Up (hea
 ### Paso 5: Correr migraciones de base de datos
 
 ```bash
-docker compose -f devOps/docker-compose.prod.yml exec api alembic upgrade head
+docker compose -f docker-compose.prod.yml exec api alembic upgrade head
 ```
 
 Esto crea los 4 schemas (operational, cognitive, governance, analytics) y todas las tablas.
@@ -98,7 +98,7 @@ Esto crea los 4 schemas (operational, cognitive, governance, analytics) y todas 
 
 ```bash
 # Crear el prompt socratico del tutor IA (OBLIGATORIO)
-docker compose -f devOps/docker-compose.prod.yml exec -T db psql -U ainative -c "
+docker compose -f docker-compose.prod.yml exec -T db psql -U ainative -c "
 INSERT INTO governance.tutor_system_prompts (id, name, content, sha256_hash, version, is_active, created_by)
 VALUES (
   gen_random_uuid(),
@@ -172,13 +172,13 @@ Los alumnos se registran solos desde la pantalla de registro.
 
 ```bash
 # Todos los servicios
-docker compose -f devOps/docker-compose.prod.yml logs -f
+docker compose -f docker-compose.prod.yml logs -f
 
 # Solo API
-docker compose -f devOps/docker-compose.prod.yml logs -f api
+docker compose -f docker-compose.prod.yml logs -f api
 
 # Solo errores
-docker compose -f devOps/docker-compose.prod.yml logs api | grep ERROR
+docker compose -f docker-compose.prod.yml logs api | grep ERROR
 ```
 
 ### Backup de base de datos
@@ -199,7 +199,7 @@ crontab -e
 
 ```bash
 gunzip -c devOps/backups/ainative_20260416_030000.sql.gz | \
-  docker compose -f devOps/docker-compose.prod.yml exec -T db psql -U ainative ainative
+  docker compose -f docker-compose.prod.yml exec -T db psql -U ainative ainative
 ```
 
 ### Actualizar (deploy nueva version)
@@ -219,13 +219,13 @@ bash devOps/scripts/rollback.sh abc1234  # Vuelve a un commit especifico
 ### Reiniciar servicios
 
 ```bash
-docker compose -f devOps/docker-compose.prod.yml restart
+docker compose -f docker-compose.prod.yml restart
 ```
 
 ### Parar todo
 
 ```bash
-docker compose -f devOps/docker-compose.prod.yml down
+docker compose -f docker-compose.prod.yml down
 # Los datos se mantienen en los volumes
 ```
 
