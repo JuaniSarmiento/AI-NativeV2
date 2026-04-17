@@ -10,7 +10,7 @@ const PROVIDERS: { value: LLMProvider; label: string; placeholder: string; defau
   { value: 'openai', label: 'OpenAI', placeholder: 'sk-...', defaultModel: 'gpt-4o-mini' },
   { value: 'anthropic', label: 'Anthropic', placeholder: 'sk-ant-...', defaultModel: 'claude-sonnet-4-20250514' },
   { value: 'mistral', label: 'Mistral', placeholder: 'your-mistral-key', defaultModel: 'mistral-small-latest' },
-  { value: 'gemini', label: 'Google Gemini', placeholder: 'AIza...', defaultModel: 'gemini-2.0-flash' },
+  { value: 'gemini', label: 'Google Gemini', placeholder: 'tu-api-key-de-google-ai-studio', defaultModel: 'gemini-2.0-flash' },
 ];
 
 export default function SettingsLLMPage() {
