@@ -26,16 +26,13 @@ services:
       - ainative-net
 
   frontend:
-    image: node:20-alpine
-    working_dir: /app
-    volumes:
-      - ./frontend:/app
-      - frontend-node-modules:/app/node_modules
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: /api
     ports:
-      - "8081:4173"
-    environment:
-      VITE_API_URL: /api
-    command: sh -c "npm install && npm run build && npm run preview -- --host 0.0.0.0 --port 4173"
+      - "8081:80"
     depends_on:
       api:
         condition: service_healthy
@@ -86,4 +83,3 @@ networks:
 volumes:
   postgres-data:
   redis-data:
-  frontend-node-modules:
