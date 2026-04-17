@@ -16,11 +16,13 @@ COPY . .
 
 EXPOSE 8001
 
-# Production: gunicorn with uvicorn workers, no reload
-CMD ["gunicorn", "app.main:create_app()", \
-     "--bind", "0.0.0.0:8001", \
-     "--workers", "4", \
-     "--worker-class", "uvicorn.workers.UvicornWorker", \
-     "--timeout", "120", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-"]
+# Run migrations before starting gunicorn.
+# Using shell form so `alembic upgrade head` executes first and fails fast
+# if the DB is unreachable or migrations are broken.
+CMD sh -c "alembic upgrade head && exec gunicorn 'app.main:create_app()' \
+     --bind 0.0.0.0:8001 \
+     --workers 4 \
+     --worker-class uvicorn.workers.UvicornWorker \
+     --timeout 120 \
+     --access-logfile - \
+     --error-logfile -"
