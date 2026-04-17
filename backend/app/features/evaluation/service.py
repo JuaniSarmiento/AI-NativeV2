@@ -158,7 +158,8 @@ class MetricsEngine:
             qe_quality_prompt, qe_critical_eval, qe_integration, qe_verification
         )
         success_efficiency = self._compute_success_efficiency(events)
-        risk_level = self._derive_risk_level(n1, n2, n3, n4, dependency_score)
+        reflection_score = self._compute_reflection_score(events)
+        risk_level = self._derive_risk_level(n1, n2, n3, n4, dependency_score, qe_score)
         evaluation_profile = self._build_evaluation_profile(
             n1, n2, n3, n4, qe_score, risk_level, now
         )
@@ -177,7 +178,7 @@ class MetricsEngine:
             qe_integration=qe_integration,
             qe_verification=qe_verification,
             dependency_score=dependency_score,
-            reflection_score=None,  # placeholder for Fase 3 expansion
+            reflection_score=reflection_score,
             success_efficiency=success_efficiency,
             risk_level=risk_level,
             computed_at=now,
@@ -245,26 +246,54 @@ class MetricsEngine:
     # ------------------------------------------------------------------
 
     def _compute_n1(self, events: list[Any], total: int) -> Decimal | None:
-        """N1 score: fraction of N1-type events scaled to 0-100.
+        """N1 score: independent comprehension score (0-100).
 
-        N1 events: reads_problem, code.snapshot.
-        These indicate the student is actively reading and observing the problem.
+        Presence (30): student read the problem at least once.
+        Depth (30): N1 events count, up to 3 events contribute 10 points each.
+        Quality (40): tutor asked N1-level questions (+20), and/or first
+          code.run was not the very first event (+20 = student read before coding).
         """
         if total == 0:
             return None
-        count = sum(1 for e in events if e.event_type in _N1_EVENT_TYPES)
-        raw = (count / total) * 100
-        return _clamp(_d2(raw))
+
+        # Presence: any reads_problem event
+        presence = 30 if any(e.event_type == "reads_problem" for e in events) else 0
+
+        # Depth: count of N1 events (reads_problem + code.snapshot), capped at 3
+        n1_count = sum(1 for e in events if e.event_type in _N1_EVENT_TYPES)
+        depth = min(30, n1_count * 10)
+
+        # Quality component 1: tutor asked N1-level questions
+        quality = 0
+        if any(
+            e.event_type == "tutor.question_asked"
+            and isinstance(e.payload, dict)
+            and int(e.payload.get("n4_level", 0) or 0) == 1
+            for e in events
+        ):
+            quality += 20
+
+        # Quality component 2: first code.run is NOT the first overall event
+        run_indices = [i for i, e in enumerate(events) if e.event_type in _N3_EVENT_TYPES]
+        if run_indices and run_indices[0] > 0:
+            quality += 20
+
+        score = presence + depth + quality
+        return _clamp(_d2(score))
 
     # ------------------------------------------------------------------
     # N2 — Strategy
     # ------------------------------------------------------------------
 
     def _compute_n2(self, events: list[Any], total: int) -> Decimal | None:
-        """N2 score: submission events weighted by quality factor.
+        """N2 score: independent strategy score (0-100).
 
-        Quality factor is 1.0 if any code.run events precede the submission
-        (student tested code before submitting), 0.5 otherwise.
+        Presence (30): at least one submission.created event.
+        Depth (30): tutor asked N2-level questions (+15), and/or code.run
+          events exist and at least one N2-level tutor event precedes them
+          by sequence_number (+15).
+        Quality (40): submission preceded by code.run (+20), multiple distinct
+          event types present (+20).
         """
         if total == 0:
             return None
@@ -273,23 +302,59 @@ class MetricsEngine:
         if not n2_events:
             return _d2(0)
 
-        # Quality factor: presence of code.run before first submission
-        had_prior_run = any(e.event_type in _N3_EVENT_TYPES for e in events)
-        quality_factor = 1.0 if had_prior_run else 0.5
+        # Presence
+        presence = 30
 
-        count = len(n2_events)
-        raw = (count / total) * quality_factor * 100
-        return _clamp(_d2(raw))
+        # Depth component 1: tutor asked N2-level questions
+        depth = 0
+        if any(
+            e.event_type == "tutor.question_asked"
+            and isinstance(e.payload, dict)
+            and int(e.payload.get("n4_level", 0) or 0) == 2
+            for e in events
+        ):
+            depth += 15
+
+        # Depth component 2: code.run events exist AND at least one N2 tutor
+        # event precedes them by sequence_number
+        run_events = [e for e in events if e.event_type in _N3_EVENT_TYPES]
+        n2_tutor_events = [
+            e for e in events
+            if e.event_type == "tutor.question_asked"
+            and isinstance(e.payload, dict)
+            and int(e.payload.get("n4_level", 0) or 0) == 2
+        ]
+        if run_events and n2_tutor_events:
+            run_seqs = [getattr(e, "sequence_number", 0) for e in run_events]
+            tutor_seqs = [getattr(e, "sequence_number", 0) for e in n2_tutor_events]
+            if any(ts < rs for ts in tutor_seqs for rs in run_seqs):
+                depth += 15
+
+        # Quality component 1: submission preceded by code.run
+        had_prior_run = any(e.event_type in _N3_EVENT_TYPES for e in events)
+        quality = 0
+        if had_prior_run:
+            quality += 20
+
+        # Quality component 2: multiple distinct event types present
+        distinct_types = {e.event_type for e in events}
+        if len(distinct_types) >= 2:
+            quality += 20
+
+        score = presence + depth + quality
+        return _clamp(_d2(score))
 
     # ------------------------------------------------------------------
     # N3 — Validation
     # ------------------------------------------------------------------
 
     def _compute_n3(self, events: list[Any], total: int) -> Decimal | None:
-        """N3 score: code.run events weighted by iteration quality.
+        """N3 score: independent validation score (0-100).
 
-        Quality factor is boosted when the student runs code multiple times
-        (indicating iterative correction), which is the core N3 behaviour.
+        Presence (30): at least one code.run event.
+        Depth (30): run count, up to 3 runs contribute 10 points each.
+        Quality (40): correction cycle detected — at least one error followed
+          by a success (+25), and last run succeeded (+15).
         """
         if total == 0:
             return None
@@ -298,17 +363,32 @@ class MetricsEngine:
         if not run_events:
             return _d2(0)
 
-        # Quality factor: multiple code.run iterations indicate correction cycles
-        num_runs = len(run_events)
-        if num_runs >= 3:
-            quality_factor = 1.2  # strong iterative validation
-        elif num_runs == 2:
-            quality_factor = 1.1  # some correction
-        else:
-            quality_factor = 1.0  # single run
+        # Presence
+        presence = 30
 
-        raw = (num_runs / total) * quality_factor * 100
-        return _clamp(_d2(raw))
+        # Depth: run count capped at 3
+        depth = min(30, len(run_events) * 10)
+
+        # Quality: convergence — errors should decrease across runs
+        quality = 0
+        runs_with_status = [e for e in run_events if isinstance(e.payload, dict)]
+        if len(runs_with_status) >= 2:
+            errors = [
+                1 if e.payload.get("status") == "error" else 0
+                for e in runs_with_status
+            ]
+            # Check if any error was followed by a success (correction cycle)
+            had_error_then_success = any(
+                errors[i] == 1 and errors[i + 1] == 0
+                for i in range(len(errors) - 1)
+            )
+            if had_error_then_success:
+                quality += 25
+            if errors[-1] == 0:
+                quality += 15
+
+        score = presence + depth + quality
+        return _clamp(_d2(score))
 
     # ------------------------------------------------------------------
     # N4 — AI Interaction quality
@@ -320,44 +400,53 @@ class MetricsEngine:
         total: int,
         dependency_score: Decimal | None,
     ) -> Decimal | None:
-        """N4 score: average n4_level from tutor.question_asked events.
+        """N4 score: independent AI interaction quality score (0-100).
 
-        n4_level values (0-3 from the classifier):
-          0 = no AI involvement / unknown
-          1 = simple/dependent question
-          2 = guided question
-          3 = critical, evaluative question
-
-        Raw score is (avg_level / 3) * 100. Then penalized by dependency_score
-        using the rubric's dependency_penalty factor.
+        Based on prompt type distribution in tutor.question_asked events:
+        - reflective_ratio = (exploratory + verifier) / total  → max 70 pts
+        - bonus for any verification behaviour (+15)
+        - bonus for using multiple prompt types (+15)
+        - penalized by dependency_score using rubric's dependency_penalty
         """
-        if total == 0:
-            return None
-
         tutor_events = [e for e in events if e.event_type in _N4_EVENT_TYPES]
         if not tutor_events:
-            return None  # no AI interaction — N4 not applicable
+            return None  # N4 not applicable without AI interaction
 
-        levels = []
-        for e in tutor_events:
-            payload = e.payload if isinstance(e.payload, dict) else {}
-            level = payload.get("n4_level")
-            if level is not None:
-                try:
-                    levels.append(int(level))
-                except (TypeError, ValueError):
-                    pass
-
-        if not levels:
+        # Collect prompt types from payload
+        prompt_types = [
+            e.payload.get("prompt_type", "exploratory")
+            for e in tutor_events
+            if isinstance(e.payload, dict)
+        ]
+        total_prompts = len(prompt_types)
+        if total_prompts == 0:
             return _d2(0)
 
-        avg_level = sum(levels) / len(levels)
-        raw = (avg_level / 3.0) * 100.0
+        exploratory_count = sum(1 for pt in prompt_types if pt == "exploratory")
+        verifier_count = sum(1 for pt in prompt_types if pt == "verifier")
+        generative_count = sum(1 for pt in prompt_types if pt == "generative")
+
+        # Reflective ratio: (exploratory + verifier) / total → base score max 70
+        reflective_ratio = (exploratory_count + verifier_count) / total_prompts
+        base_score = reflective_ratio * 70.0
+
+        # Bonus: verification behaviour
+        if verifier_count > 0:
+            base_score += 15.0
+
+        # Bonus: diversity (student used multiple distinct prompt types)
+        types_used = sum(
+            1
+            for c in [exploratory_count, verifier_count, generative_count]
+            if c > 0
+        )
+        if types_used >= 2:
+            base_score += 15.0
 
         # Apply dependency penalty
         penalty = float(self._rubric.quality_factors.n4.dependency_penalty)
         dep = float(dependency_score) if dependency_score is not None else 0.0
-        penalized = raw * (1.0 - penalty * dep)
+        penalized = base_score * (1.0 - penalty * dep)
 
         return _clamp(_d2(penalized))
 
@@ -388,52 +477,54 @@ class MetricsEngine:
             )
             qe_quality_prompt = _clamp(_d2((high_quality / len(tutor_ask_events)) * 100))
 
-        # qe_critical_evaluation: presence of code.run events after tutor.response_received
+        # qe_critical_evaluation: code.run events after EACH tutor response
         qe_critical_evaluation: Decimal | None = None
         if tutor_resp_events and run_events:
-            # Find code.run events that occur after at least one tutor response
-            # Use sequence_number ordering
             try:
-                last_resp_seq = max(
+                resp_seqs = sorted(
                     getattr(e, "sequence_number", 0) for e in tutor_resp_events
                 )
-                runs_after_resp = sum(
-                    1
-                    for e in run_events
-                    if getattr(e, "sequence_number", 0) > last_resp_seq
-                )
-                total_runs = len(run_events)
-                if total_runs > 0:
-                    qe_critical_evaluation = _clamp(_d2((runs_after_resp / total_runs) * 100))
+                run_seqs = [getattr(e, "sequence_number", 0) for e in run_events]
+                responses_followed_by_run = 0
+                for resp_seq in resp_seqs:
+                    if any(rs > resp_seq for rs in run_seqs):
+                        responses_followed_by_run += 1
+                total_responses = len(resp_seqs)
+                if total_responses > 0:
+                    qe_critical_evaluation = _clamp(
+                        _d2((responses_followed_by_run / total_responses) * 100)
+                    )
                 else:
                     qe_critical_evaluation = _d2(0)
             except Exception:
                 qe_critical_evaluation = _d2(0)
         elif not tutor_resp_events:
-            qe_critical_evaluation = None  # not applicable
+            qe_critical_evaluation = None
         else:
             qe_critical_evaluation = _d2(0)
 
-        # qe_integration: % of code.run after tutor help that succeeded (status != "error")
+        # qe_integration: % of post-tutor code.run events that succeeded
         qe_integration: Decimal | None = None
         if tutor_resp_events and run_events:
             try:
-                last_resp_seq = max(
+                resp_seqs = sorted(
                     getattr(e, "sequence_number", 0) for e in tutor_resp_events
                 )
-                runs_after = [
+                runs_after_any_resp = [
                     e
                     for e in run_events
-                    if getattr(e, "sequence_number", 0) > last_resp_seq
+                    if any(
+                        getattr(e, "sequence_number", 0) > rs for rs in resp_seqs
+                    )
                 ]
-                if runs_after:
+                if runs_after_any_resp:
                     successful = sum(
                         1
-                        for e in runs_after
+                        for e in runs_after_any_resp
                         if isinstance(e.payload, dict)
                         and e.payload.get("status") != "error"
                     )
-                    qe_integration = _clamp(_d2((successful / len(runs_after)) * 100))
+                    qe_integration = _clamp(_d2((successful / len(runs_after_any_resp)) * 100))
                 else:
                     qe_integration = None
             except Exception:
@@ -515,6 +606,46 @@ class MetricsEngine:
         )
         return _clamp(_d2((successful / len(run_events)) * 100))
 
+    def _compute_reflection_score(self, events: list[Any]) -> Decimal | None:
+        """Compute reflection_score from reflection.submitted events.
+
+        Factors: number of fields filled (max 5), presence of
+        difficulty_perception and confidence_level in payload.
+        """
+        reflection_events = [e for e in events if e.event_type == "reflection.submitted"]
+        if not reflection_events:
+            return None
+
+        last_reflection = reflection_events[-1]
+        payload = last_reflection.payload if isinstance(last_reflection.payload, dict) else {}
+
+        fields_present = 0
+        for field in (
+            "difficulty_perception",
+            "strategy_description",
+            "ai_usage_evaluation",
+            "what_would_change",
+            "confidence_level",
+        ):
+            val = payload.get(field)
+            if val is not None and val != "" and val != 0:
+                fields_present += 1
+
+        base = (fields_present / 5.0) * 80.0
+
+        difficulty = payload.get("difficulty_perception")
+        confidence = payload.get("confidence_level")
+        if difficulty is not None and confidence is not None:
+            try:
+                diff_val = int(difficulty)
+                conf_val = int(confidence)
+                if 1 <= diff_val <= 5 and 1 <= conf_val <= 5:
+                    base += 20.0
+            except (TypeError, ValueError):
+                pass
+
+        return _clamp(_d2(base))
+
     # ------------------------------------------------------------------
     # Risk level
     # ------------------------------------------------------------------
@@ -526,6 +657,7 @@ class MetricsEngine:
         n3: Decimal | None,
         n4: Decimal | None,
         dependency_score: Decimal | None,
+        qe_score: Decimal | None = None,
     ) -> str:
         """Classify risk level based on rubric thresholds.
 
@@ -536,6 +668,7 @@ class MetricsEngine:
         n_scores = [float(s) for s in [n1, n2, n3, n4] if s is not None]
         min_n_score = min(n_scores) if n_scores else 100.0
         n4_score = float(n4) if n4 is not None else 100.0
+        qe_val = float(qe_score) if qe_score is not None else 100.0
 
         # Critical
         crit = rt.critical
@@ -555,13 +688,8 @@ class MetricsEngine:
         med = rt.medium
         if med.any_n_score_max is not None and min_n_score <= med.any_n_score_max:
             return "medium"
-
-        from decimal import Decimal as _Dec
-
-        if med.qe_score_max is not None:
-            # Also check qe indirectly via the n-scores — we already checked n-scores above
-            # If we fall here, all n-scores are above medium threshold; return low
-            pass
+        if med.qe_score_max is not None and qe_val <= med.qe_score_max:
+            return "medium"
 
         return "low"
 

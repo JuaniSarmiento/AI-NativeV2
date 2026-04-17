@@ -31,15 +31,15 @@ export const useTeacherDashboardStore = create<TeacherDashboardState>((set, get)
   isLoading: false,
   error: null,
   selectedStudentId: null,
-  sortField: 'latest_n1',
-  sortDirection: 'desc',
+  sortField: 'student_name',
+  sortDirection: 'asc',
   riskFilter: null,
 
   risks: EMPTY_RISKS,
   isLoadingRisks: false,
 
   fetchDashboard: async (courseId, commissionId, exerciseId) => {
-    set({ isLoading: true, error: null });
+    set({ isLoading: true, error: null, dashboard: null });
     try {
       let path = `/v1/teacher/courses/${courseId}/dashboard?commission_id=${commissionId}`;
       if (exerciseId) path += `&exercise_id=${exerciseId}`;
@@ -66,7 +66,7 @@ export const useTeacherDashboardStore = create<TeacherDashboardState>((set, get)
   setRiskFilter: (level) => set({ riskFilter: level }),
 
   fetchRisks: async (commissionId) => {
-    set({ isLoadingRisks: true });
+    set({ isLoadingRisks: true, risks: EMPTY_RISKS, error: null });
     try {
       const res = await apiClient.get<RiskAssessment[]>(
         `/v1/teacher/commissions/${commissionId}/risks?per_page=100`,
@@ -90,17 +90,16 @@ export const useTeacherDashboardStore = create<TeacherDashboardState>((set, get)
         risks: state.risks.map((r) => (r.id === riskId ? updated : r)),
       }));
     } catch {
-      // Silently fail — the user can retry
+      // silent
     }
   },
 
   triggerAssessment: async (commissionId) => {
     try {
       await apiClient.post(`/v1/teacher/commissions/${commissionId}/risks/assess`, {});
-      // Refresh risks after assessment
       await get().fetchRisks(commissionId);
     } catch {
-      // Silently fail
+      // silent
     }
   },
 }));

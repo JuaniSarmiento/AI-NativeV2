@@ -25,12 +25,29 @@ quality_factors:
   n1:
     events: ["reads_problem", "code.snapshot"]
     min_engagement_seconds: 10
+    presence_weight: 30
+    depth_weight: 30
+    quality_weight: 40
   n2:
     events: ["submission.created"]
     requires_prior: ["code.run"]
+    presence_weight: 30
+    depth_weight: 30
+    quality_weight: 40
   n3:
     events: ["code.run"]
     requires_correction: true
+    presence_weight: 30
+    depth_weight: 30
+    quality_weight: 40
   n4:
     events: ["tutor.question_asked"]
     dependency_penalty: 0.3
+    reflective_base_weight: 70
+    verifier_bonus: 15
+    diversity_bonus: 15
+
+coherence:
+  external_integration_threshold_lines: 50
+  external_integration_lookback_minutes: 5
+  code_discourse_keywords_min_match: 0.3

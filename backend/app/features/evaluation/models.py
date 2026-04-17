@@ -141,6 +141,33 @@ class CognitiveMetrics(Base):
         comment="Successful code runs / total code runs ratio * 100",
     )
 
+    # --- Coherence scores (Fase C — EPIC-20) ---
+    temporal_coherence_score: Mapped[Decimal | None] = mapped_column(
+        Numeric(5, 2),
+        nullable=True,
+        comment="Temporal coherence of N-level event sequences 0-100",
+    )
+    code_discourse_score: Mapped[Decimal | None] = mapped_column(
+        Numeric(5, 2),
+        nullable=True,
+        comment="Coherence between chat discourse and code changes 0-100",
+    )
+    inter_iteration_score: Mapped[Decimal | None] = mapped_column(
+        Numeric(5, 2),
+        nullable=True,
+        comment="Consistency across code iterations 0-100",
+    )
+    coherence_anomalies: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Detected anomaly patterns: solution_without_comprehension, pure_delegation, etc.",
+    )
+    prompt_type_distribution: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Distribution of prompt types: {exploratory: N, verifier: N, generative: N}",
+    )
+
     # --- Risk classification ---
     risk_level: Mapped[str | None] = mapped_column(
         String(20),

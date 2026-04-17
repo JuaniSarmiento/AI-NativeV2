@@ -9,8 +9,9 @@ import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.logging import get_logger
-from app.features.cognitive.classifier import CognitiveEventClassifier
+from app.features.cognitive.classifier import CognitiveEventClassifier, llm_classify_message
 from app.features.cognitive.service import CognitiveService
+from app.features.tutor.n4_classifier import N4Classifier
 
 logger = get_logger(__name__)
 
@@ -42,10 +43,15 @@ class CognitiveEventConsumer:
         self,
         redis: aioredis.Redis,  # type: ignore[type-arg]
         session_factory: async_sessionmaker[AsyncSession],
+        api_key: str = "",
+        model: str = "mistral-small-latest",
     ) -> None:
         self._redis = redis
         self._session_factory = session_factory
         self._classifier = CognitiveEventClassifier()
+        self._n4_classifier = N4Classifier()
+        self._api_key = api_key
+        self._model = model
         self._running = False
 
     # ------------------------------------------------------------------
@@ -180,6 +186,43 @@ class CognitiveEventConsumer:
             )
             return
 
+        # --- Hybrid LLM classification (optional, only for tutor interactions) ---
+        if (
+            event_type_raw == "tutor.interaction.completed"
+            and self._api_key
+            and isinstance(payload.get("content"), str)
+        ):
+            content = payload["content"]
+            role = payload.get("role", "user")
+            # Only upgrade if regex confidence is low
+            regex_result = self._n4_classifier.classify_message(content, role)
+            if regex_result.confidence == "low":
+                try:
+                    llm_result = await llm_classify_message(
+                        content=content,
+                        role=role,
+                        api_key=self._api_key,
+                        model=self._model,
+                        timeout=3.0,
+                    )
+                    if llm_result is not None:
+                        llm_level, llm_prompt_type = llm_result
+                        classified.n4_level = llm_level
+                        if llm_prompt_type is not None:
+                            classified.payload = {**classified.payload, "prompt_type": llm_prompt_type}
+                        logger.debug(
+                            "LLM classification upgraded regex result",
+                            extra={
+                                "n4_level": llm_level,
+                                "prompt_type": llm_prompt_type,
+                            },
+                        )
+                except Exception:
+                    logger.warning(
+                        "Hybrid LLM classification failed — using regex result",
+                        extra={"event_type": event_type_raw},
+                    )
+
         # --- Extract routing keys from payload ---
         student_id_str = payload.get("student_id")
         exercise_id_str = payload.get("exercise_id")
@@ -190,9 +233,19 @@ class CognitiveEventConsumer:
             )
             return
 
-        commission_id_str = payload.get(
-            "commission_id", "00000000-0000-0000-0000-000000000000"
-        )
+        commission_id_str = payload.get("commission_id")
+        _ZERO_UUID = "00000000-0000-0000-0000-000000000000"
+        if not commission_id_str or commission_id_str == _ZERO_UUID:
+            logger.warning(
+                "CTR event has missing or zero commission_id — discarding",
+                extra={
+                    "event_type": event_type_raw,
+                    "student_id": student_id_str,
+                    "exercise_id": exercise_id_str,
+                    "commission_id": commission_id_str,
+                },
+            )
+            return
 
         try:
             student_id = uuid.UUID(student_id_str)

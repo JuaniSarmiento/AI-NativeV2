@@ -19,6 +19,7 @@ import ExercisePatternsPage from '@/features/teacher/patterns/ExercisePatternsPa
 import GovernanceReportsPage from '@/features/teacher/governance/GovernanceReportsPage';
 import GradingPage from '@/features/teacher/grading/GradingPage';
 import StudentProgress from '@/features/student/progress/StudentProgress';
+import StudentActivityPage from '@/features/teacher/student/StudentActivityPage';
 
 /* ---------------------------------------------------------------
    Placeholder pages — replaced by real features in future EPICs
@@ -114,6 +115,7 @@ export default function App() {
           <Route path="exercises/:exerciseId" element={<ExerciseDetailPage />} />
           <Route path="teacher/courses/:courseId/dashboard" element={<TeacherDashboard />} />
           <Route path="teacher/trace/:sessionId" element={<TracePage />} />
+          <Route path="teacher/students/:studentId/activity" element={<StudentActivityPage />} />
           <Route path="teacher/courses/:courseId/exercises/:exerciseId/patterns" element={<ExercisePatternsPage />} />
           <Route path="teacher/activities/:activityId/grading" element={<GradingPage />} />
           <Route path="admin/governance" element={<GovernanceReportsPage />} />

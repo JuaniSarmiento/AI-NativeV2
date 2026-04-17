@@ -1,66 +1,84 @@
 import { useTraceStore } from './store';
+import RiskBadge from '@/features/teacher/dashboard/RiskBadge';
 import type { RiskLevel } from '@/features/teacher/dashboard/types';
-import { RISK_LABELS } from '@/features/teacher/dashboard/types';
+import { RISK_DESCRIPTIONS } from '@/features/teacher/dashboard/types';
 
-function riskBadgeClasses(level: string): string {
-  const base = 'inline-block rounded-full px-2.5 py-0.5 text-[0.6875rem] font-semibold uppercase tracking-[0.08em]';
-  switch (level) {
-    case 'critical':
-      return `${base} bg-[var(--color-error-50)] text-[var(--color-error-700)] dark:bg-[var(--color-error-900)]/20 dark:text-[var(--color-error-400)]`;
-    case 'high':
-      return `${base} bg-[var(--color-warning-50)] text-[var(--color-warning-700)] dark:bg-[var(--color-warning-900)]/20 dark:text-[var(--color-warning-400)]`;
-    case 'medium':
-      return `${base} bg-[var(--color-warning-50)] text-[var(--color-warning-600)] dark:bg-[var(--color-warning-900)]/10 dark:text-[var(--color-warning-300)]`;
-    default:
-      return `${base} bg-[var(--color-success-50)] text-[var(--color-success-700)] dark:bg-[var(--color-success-900)]/20 dark:text-[var(--color-success-400)]`;
-  }
+function scoreColor(val: number | null): string {
+  if (val === null) return 'text-[var(--color-text-tertiary)]';
+  if (val >= 70) return 'text-[var(--color-success-600)] dark:text-[var(--color-success-400)]';
+  if (val >= 40) return 'text-[var(--color-warning-600)] dark:text-[var(--color-warning-400)]';
+  return 'text-[var(--color-error-600)] dark:text-[var(--color-error-400)]';
 }
 
-function ScoreItem({ label, value }: { label: string; value: number | null }) {
-  return (
-    <div>
-      <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-[var(--color-text-tertiary)]">
-        {label}
-      </p>
-      <p className="mt-0.5 text-[1.25rem] font-bold tabular-nums tracking-tight text-[var(--color-text-primary)]">
-        {value !== null ? value.toFixed(1) : '-'}
-      </p>
-    </div>
-  );
+function barColor(val: number | null): string {
+  if (val === null || val === undefined) return 'bg-[var(--color-neutral-300)]';
+  if (val >= 70) return 'bg-[var(--color-success-500)]';
+  if (val >= 40) return 'bg-[var(--color-warning-500)]';
+  return 'bg-[var(--color-error-500)]';
 }
+
+const DIMENSIONS = [
+  { key: 'n1', field: 'n1_comprehension_score' as const, label: 'Comprension', desc: 'Entiende el problema?' },
+  { key: 'n2', field: 'n2_strategy_score' as const, label: 'Estrategia', desc: 'Planifica antes de codear?' },
+  { key: 'n3', field: 'n3_validation_score' as const, label: 'Validacion', desc: 'Verifica y corrige?' },
+  { key: 'n4', field: 'n4_ai_interaction_score' as const, label: 'Uso de IA', desc: 'Usa IA criticamente?' },
+];
 
 export default function MetricsSummaryCard() {
   const metrics = useTraceStore((s) => s.metrics);
 
   if (!metrics) {
     return (
-      <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-        <p className="text-[0.875rem] text-[var(--color-text-tertiary)]">
-          Metricas pendientes
+      <div className="rounded-xl border border-dashed border-[var(--color-border)] p-6 text-center">
+        <p className="text-sm text-[var(--color-text-tertiary)]">
+          Las metricas se calculan cuando la sesion se cierra.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-      <div className="flex flex-wrap items-center gap-6">
-        <ScoreItem label="N1" value={metrics.n1_comprehension_score} />
-        <ScoreItem label="N2" value={metrics.n2_strategy_score} />
-        <ScoreItem label="N3" value={metrics.n3_validation_score} />
-        <ScoreItem label="N4" value={metrics.n4_ai_interaction_score} />
-        <ScoreItem label="Qe" value={metrics.qe_score} />
-        <ScoreItem label="Dep." value={metrics.dependency_score} />
+    <div className="space-y-4">
+      {/* Qe + Risk row */}
+      <div className="flex flex-wrap items-center gap-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+        <div>
+          <p className="text-xs font-medium text-[var(--color-text-tertiary)]">Calidad Epistemica</p>
+          <p className={`text-2xl font-bold tabular-nums ${scoreColor(metrics.qe_score)}`}>
+            {metrics.qe_score != null ? metrics.qe_score.toFixed(0) : '-'}
+          </p>
+        </div>
         {metrics.risk_level && (
-          <div>
-            <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-[var(--color-text-tertiary)]">
-              Riesgo
-            </p>
-            <span className={`mt-1 ${riskBadgeClasses(metrics.risk_level)}`}>
-              {RISK_LABELS[metrics.risk_level as RiskLevel] ?? metrics.risk_level}
+          <div className="flex items-center gap-2">
+            <RiskBadge level={metrics.risk_level as RiskLevel} />
+            <span className="text-xs text-[var(--color-text-secondary)]">
+              {RISK_DESCRIPTIONS[metrics.risk_level as RiskLevel] ?? ''}
             </span>
           </div>
         )}
+      </div>
+
+      {/* N1-N4 grid */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {DIMENSIONS.map((dim) => {
+          const val = metrics[dim.field] as number | null;
+          return (
+            <div key={dim.key} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+              <div className="flex items-baseline justify-between">
+                <span className="text-xs font-medium text-[var(--color-text-secondary)]">{dim.label}</span>
+                <span className={`text-lg font-bold tabular-nums ${scoreColor(val)}`}>
+                  {val != null ? val.toFixed(0) : '-'}
+                </span>
+              </div>
+              <p className="mt-0.5 text-[0.625rem] text-[var(--color-text-tertiary)]">{dim.desc}</p>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-neutral-100)] dark:bg-[var(--color-neutral-800)]">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${barColor(val)}`}
+                  style={{ width: `${val ?? 0}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

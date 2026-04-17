@@ -41,6 +41,9 @@ class N4ClassificationResult:
     confidence: str
     """One of: 'high', 'medium', 'low'."""
 
+    prompt_type: str | None = None
+    """One of: 'generative', 'verifier', 'exploratory', or None for assistant messages."""
+
 
 # ---------------------------------------------------------------------------
 # Compiled regex patterns
@@ -219,6 +222,46 @@ _SUB_DEPENDENT_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+# ---- Prompt type patterns ----
+
+_PROMPT_TYPE_GENERATIVE = re.compile(
+    r"(?:"
+    r"hac[eé] vos"
+    r"|dame el c[oó]digo"
+    r"|escribime"
+    r"|resolvelo"
+    r"|pasame la soluci[oó]n"
+    r"|codea vos"
+    r"|hacelo vos"
+    r")",
+    re.IGNORECASE,
+)
+
+_PROMPT_TYPE_VERIFIER = re.compile(
+    r"(?:"
+    r"est[aá] bien mi"
+    r"|es correcto"
+    r"|lo hice bien"
+    r"|funciona\?"
+    r"|verific[aá]"
+    r"|est[aá] mal\?"
+    r"|lo hice bien\?"
+    r")",
+    re.IGNORECASE,
+)
+
+_PROMPT_TYPE_EXPLORATORY = re.compile(
+    r"(?:"
+    r"c[oó]mo funciona"
+    r"|por qu[eé]"
+    r"|qu[eé] pasa si"
+    r"|explic[aá]me"
+    r"|para qu[eé] sirve"
+    r"|qu[eé] diferencia hay"
+    r")",
+    re.IGNORECASE,
+)
+
 
 # ---------------------------------------------------------------------------
 # Classifier
@@ -247,12 +290,14 @@ class N4Classifier:
 
         Returns:
             A :class:`N4ClassificationResult` with level, sub-classification,
-            and confidence.
+            confidence, and prompt_type.
         """
         if role == "user":
             n4_level, confidence = self._classify_user(content)
+            prompt_type = self._classify_prompt_type(content)
         else:
             n4_level, confidence = self._classify_assistant(content)
+            prompt_type = None
 
         sub_classification = self._classify_sub(content)
 
@@ -263,6 +308,7 @@ class N4Classifier:
                 "n4_level": n4_level,
                 "sub_classification": sub_classification,
                 "confidence": confidence,
+                "prompt_type": prompt_type,
             },
         )
 
@@ -270,6 +316,7 @@ class N4Classifier:
             n4_level=n4_level,
             sub_classification=sub_classification,
             confidence=confidence,
+            prompt_type=prompt_type,
         )
 
     # ------------------------------------------------------------------
@@ -301,6 +348,26 @@ class N4Classifier:
             return 1, "high"
         # Default: N1 with low confidence
         return 1, "low"
+
+    def _classify_prompt_type(self, content: str) -> str | None:
+        """Determine the prompt type for a user message.
+
+        Checks generative first (most specific), then verifier, then
+        exploratory. Falls back to 'exploratory' as the default.
+
+        Args:
+            content: The raw user message text.
+
+        Returns:
+            One of 'generative', 'verifier', 'exploratory'.
+        """
+        if _PROMPT_TYPE_GENERATIVE.search(content):
+            return "generative"
+        if _PROMPT_TYPE_VERIFIER.search(content):
+            return "verifier"
+        if _PROMPT_TYPE_EXPLORATORY.search(content):
+            return "exploratory"
+        return "exploratory"
 
     def _classify_sub(self, content: str) -> str:
         """Determine sub-classification from message content."""

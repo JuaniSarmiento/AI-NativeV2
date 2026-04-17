@@ -122,9 +122,10 @@ class SessionListItem(BaseModel):
     started_at: datetime
     closed_at: datetime | None = None
     status: str
+    exercise_title: str | None = None
 
     @classmethod
-    def from_orm(cls, obj: object) -> "SessionListItem":
+    def from_orm(cls, obj: object, exercise_title: str | None = None) -> "SessionListItem":
         status_val = getattr(obj, "status")
         return cls(
             id=str(getattr(obj, "id")),
@@ -134,6 +135,7 @@ class SessionListItem(BaseModel):
             started_at=getattr(obj, "started_at"),
             closed_at=getattr(obj, "closed_at", None),
             status=status_val.value if hasattr(status_val, "value") else str(status_val),
+            exercise_title=exercise_title,
         )
 
 
@@ -186,6 +188,9 @@ class TraceResponse(BaseModel):
     """Unified trace payload — session + timeline + code + chat + metrics."""
 
     session: CognitiveSessionResponse
+    student_name: str | None = None
+    student_email: str | None = None
+    exercise_title: str | None = None
     timeline: list[TimelineEventResponse] = []
     code_evolution: list[CodeSnapshotEntry] = []
     chat: list[TraceChatMessageResponse] = []

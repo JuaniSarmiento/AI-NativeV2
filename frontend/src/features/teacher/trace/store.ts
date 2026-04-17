@@ -8,6 +8,9 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
 
 interface TraceState {
   session: TraceSession | null;
+  studentName: string | null;
+  studentEmail: string | null;
+  exerciseTitle: string | null;
   events: TraceEvent[];
   metrics: TraceMetrics | null;
   verification: VerifyResult | null;
@@ -22,6 +25,9 @@ interface TraceState {
 
 export const useTraceStore = create<TraceState>((set) => ({
   session: null,
+  studentName: null,
+  studentEmail: null,
+  exerciseTitle: null,
   events: EMPTY_EVENTS,
   metrics: null,
   verification: null,
@@ -33,34 +39,19 @@ export const useTraceStore = create<TraceState>((set) => ({
   fetchTrace: async (sessionId) => {
     set({ isLoading: true, error: null });
     try {
-      // Fetch trace, code evolution, and chat in parallel
-      const [traceRes, codeRes] = await Promise.all([
-        apiClient.get<TraceData>(`/v1/cognitive/sessions/${sessionId}/trace`),
-        apiClient.get<CodeSnapshot[]>(`/v1/cognitive/sessions/${sessionId}/code-evolution`),
-      ]);
-
+      const traceRes = await apiClient.get<TraceData>(`/v1/cognitive/sessions/${sessionId}/trace`);
       const trace = traceRes.data;
-      const exerciseId = trace.session.exercise_id;
-
-      // Chat fetched via teacher endpoint (docente can read any student's chat)
-      const studentId = trace.session.student_id;
-      let chatMessages: ChatMessage[] = EMPTY_MESSAGES;
-      try {
-        const chatRes = await apiClient.get<ChatMessage[]>(
-          `/v1/teacher/students/${studentId}/exercises/${exerciseId}/messages`,
-        );
-        chatMessages = chatRes.data;
-      } catch {
-        // Chat may not exist for all sessions
-      }
 
       set({
         session: trace.session,
-        events: trace.session.events ?? EMPTY_EVENTS,
+        studentName: trace.student_name,
+        studentEmail: trace.student_email,
+        exerciseTitle: trace.exercise_title,
+        events: trace.timeline ?? trace.session.events ?? EMPTY_EVENTS,
         metrics: trace.metrics,
         verification: trace.verification,
-        snapshots: codeRes.data ?? EMPTY_SNAPSHOTS,
-        chatMessages,
+        snapshots: trace.code_evolution ?? EMPTY_SNAPSHOTS,
+        chatMessages: trace.chat ?? EMPTY_MESSAGES,
       });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Error cargando traza' });
@@ -72,6 +63,9 @@ export const useTraceStore = create<TraceState>((set) => ({
   clear: () =>
     set({
       session: null,
+      studentName: null,
+      studentEmail: null,
+      exerciseTitle: null,
       events: EMPTY_EVENTS,
       metrics: null,
       verification: null,

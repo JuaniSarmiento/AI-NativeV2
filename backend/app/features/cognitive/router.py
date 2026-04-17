@@ -17,6 +17,7 @@ from app.features.cognitive.schemas import (
     SessionListItem,
     SessionListMeta,
     SessionListResponse,
+    TraceChatMessageResponse,
     TimelineEventResponse,
     TimelineResponse,
     TraceResponse,
@@ -117,8 +118,12 @@ async def list_sessions(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     service: CognitiveService = Depends(get_cognitive_service),
+    db: AsyncSession = Depends(get_async_session),
     _user: User = require_role("docente", "admin"),
 ) -> SessionListResponse:
+    from sqlalchemy import select
+    from app.shared.models.exercise import Exercise
+
     items, total = await service._session_repo.get_sessions_by_commission(
         commission_id=commission_id,
         student_id=student_id,
@@ -127,9 +132,22 @@ async def list_sessions(
         page=page,
         per_page=per_page,
     )
+
+    exercise_ids = list({s.exercise_id for s in items})
+    title_map: dict[uuid.UUID, str] = {}
+    if exercise_ids:
+        ex_result = await db.execute(
+            select(Exercise.id, Exercise.title).where(Exercise.id.in_(exercise_ids))
+        )
+        for row in ex_result:
+            title_map[row.id] = row.title
+
     total_pages = max(1, (total + per_page - 1) // per_page)
     return SessionListResponse(
-        data=[SessionListItem.from_orm(s) for s in items],
+        data=[
+            SessionListItem.from_orm(s, exercise_title=title_map.get(s.exercise_id))
+            for s in items
+        ],
         meta=SessionListMeta(page=page, per_page=per_page, total=total, total_pages=total_pages),
     )
 
@@ -142,32 +160,48 @@ async def list_sessions(
 async def get_session_trace(
     session_id: uuid.UUID,
     service: CognitiveService = Depends(get_cognitive_service),
+    db: AsyncSession = Depends(get_async_session),
     _user: User = require_role("docente", "admin"),
 ) -> TraceStandardResponse:
-    from app.core.exceptions import NotFoundError
-    from app.features.evaluation.repositories import CognitiveMetricsRepository
+    from sqlalchemy import select
+    from app.features.evaluation.schemas import CognitiveMetricsResponse
+    from app.shared.models.exercise import Exercise
 
-    cog_session = await service._session_repo.get_session_with_events(session_id)
-    if cog_session is None:
-        raise NotFoundError(resource="CognitiveSession", identifier=str(session_id))
+    trace = await service.get_trace(session_id)
+    cog_session = trace["session"]
 
-    # Metrics (may not exist for open sessions)
-    metrics_repo = CognitiveMetricsRepository(service._session_repo._session)
-    metrics_obj = await metrics_repo.get_by_session(session_id)
+    user_row = (await db.execute(
+        select(User).where(User.id == cog_session.student_id)
+    )).scalar_one_or_none()
+
+    exercise_row = (await db.execute(
+        select(Exercise).where(Exercise.id == cog_session.exercise_id)
+    )).scalar_one_or_none()
+
+    session_resp = CognitiveSessionResponse.from_orm(cog_session)
+    timeline = [TimelineEventResponse.from_orm(e) for e in trace["events"]]
+    chat = [TraceChatMessageResponse.from_orm(m) for m in trace["chat"]]
+    code_evo = [
+        CodeSnapshotEntry(**entry) if isinstance(entry, dict) else entry
+        for entry in trace["code_evolution"]
+    ]
     metrics_dict = None
-    if metrics_obj is not None:
-        from app.features.evaluation.schemas import CognitiveMetricsResponse
-        metrics_dict = CognitiveMetricsResponse.from_orm(metrics_obj).model_dump()
+    if trace["metrics"] is not None:
+        metrics_dict = CognitiveMetricsResponse.from_orm(trace["metrics"]).model_dump()
 
-    # Verification
     verify_result = None
-    if cog_session.status in ("closed", "invalidated"):
-        raw = await service.verify_session(session_id)
-        verify_result = VerifyResponse(**raw)
+    if trace["verification"] is not None:
+        verify_result = VerifyResponse(**trace["verification"])
 
     return TraceStandardResponse(
         data=TraceResponse(
-            session=CognitiveSessionResponse.from_orm(cog_session),
+            session=session_resp,
+            student_name=user_row.full_name if user_row else None,
+            student_email=user_row.email if user_row else None,
+            exercise_title=getattr(exercise_row, "title", None) if exercise_row else None,
+            timeline=timeline,
+            code_evolution=code_evo,
+            chat=chat,
             metrics=metrics_dict,
             verification=verify_result,
         ),

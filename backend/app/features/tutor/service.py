@@ -170,7 +170,28 @@ class TutorService:
 
         tokens_used = usage.output_tokens if usage else None
 
-        # Outbox event for the completed assistant turn
+        now_ts = datetime.now(tz=timezone.utc).isoformat()
+
+        # Outbox event for the user turn
+        self._session.add(EventOutbox(
+            event_type="tutor.interaction.completed",
+            payload={
+                "interaction_id": str(user_interaction.id),
+                "student_id": str(student_id),
+                "exercise_id": str(exercise_id),
+                "session_id": str(session_id),
+                "commission_id": commission_id,
+                "role": "user",
+                "content": message,
+                "n4_level": user_classification.n4_level,
+                "n4_sub_classification": user_classification.sub_classification,
+                "prompt_type": user_classification.prompt_type,
+                "prompt_hash": prompt.sha256_hash,
+                "timestamp": now_ts,
+            },
+        ))
+
+        # Outbox event for the assistant turn
         self._session.add(EventOutbox(
             event_type="tutor.interaction.completed",
             payload={
@@ -182,32 +203,13 @@ class TutorService:
                 "role": "assistant",
                 "n4_level": assistant_classification.n4_level,
                 "n4_sub_classification": assistant_classification.sub_classification,
+                "prompt_type": None,
                 "prompt_hash": prompt.sha256_hash,
                 "tokens_used": tokens_used,
                 "guardrail_violation": guardrail_result.violation_type,
-                "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+                "timestamp": now_ts,
             },
         ))
-        await self._session.flush()
-
-        # Emit cognitive.classified events for both turns
-        for interaction, classification in [
-            (user_interaction, user_classification),
-            (assistant_interaction, assistant_classification),
-        ]:
-            self._session.add(EventOutbox(
-                event_type="cognitive.classified",
-                payload={
-                    "interaction_id": str(interaction.id),
-                    "n4_level": classification.n4_level,
-                    "sub_classification": classification.sub_classification,
-                    "exercise_id": str(exercise_id),
-                    "student_id": str(student_id),
-                    "session_id": str(session_id),
-                    "role": interaction.role.value,
-                    "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-                },
-            ))
         await self._session.flush()
 
         # Emit guardrail event when a violation was detected

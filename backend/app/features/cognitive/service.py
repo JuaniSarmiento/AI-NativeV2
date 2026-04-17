@@ -160,6 +160,19 @@ class CognitiveService:
             )
             self._session.add(metrics_obj)
 
+            # Compute coherence scores (EPIC-20 Fase C)
+            from app.features.evaluation.coherence import CoherenceEngine
+            coherence_engine = CoherenceEngine(rubric)
+            chat_repo = TutorInteractionRepository(self._session)
+            chat_msgs = await chat_repo.get_session_messages(session_id, limit=200)
+            _, code_entries = await self.get_code_evolution(session_id, limit=200)
+            coherence = coherence_engine.compute(events, chat_msgs, code_entries)
+            metrics_obj.temporal_coherence_score = coherence.temporal_coherence_score
+            metrics_obj.code_discourse_score = coherence.code_discourse_score
+            metrics_obj.inter_iteration_score = coherence.inter_iteration_score
+            metrics_obj.coherence_anomalies = coherence.coherence_anomalies
+            metrics_obj.prompt_type_distribution = coherence.prompt_type_distribution
+
             # Set n4_final_score on the session
             cognitive_session.n4_final_score = result.evaluation_profile
             await self._session.flush()

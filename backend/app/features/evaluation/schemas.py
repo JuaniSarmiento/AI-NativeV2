@@ -51,6 +51,12 @@ class CognitiveMetricsResponse(BaseModel):
     risk_level: str | None = None
     computed_at: datetime | None = None
     created_at: datetime
+    # Coherence scores (EPIC-20 Fase C)
+    temporal_coherence_score: float | None = None
+    code_discourse_score: float | None = None
+    inter_iteration_score: float | None = None
+    coherence_anomalies: dict | None = None
+    prompt_type_distribution: dict | None = None
 
     @classmethod
     def from_orm(cls, obj: object) -> "CognitiveMetricsResponse":
@@ -78,6 +84,12 @@ class CognitiveMetricsResponse(BaseModel):
             risk_level=getattr(obj, "risk_level", None),
             computed_at=getattr(obj, "computed_at", None),
             created_at=getattr(obj, "created_at"),
+            # Coherence scores (EPIC-20 Fase C)
+            temporal_coherence_score=_f(getattr(obj, "temporal_coherence_score", None)),
+            code_discourse_score=_f(getattr(obj, "code_discourse_score", None)),
+            inter_iteration_score=_f(getattr(obj, "inter_iteration_score", None)),
+            coherence_anomalies=getattr(obj, "coherence_anomalies", None),
+            prompt_type_distribution=getattr(obj, "prompt_type_distribution", None),
         )
 
 
@@ -131,6 +143,8 @@ class StudentSummary(BaseModel):
     """Brief cognitive profile for one student in a commission dashboard."""
 
     student_id: str
+    student_name: str | None = None
+    student_email: str | None = None
     session_count: int = 0
     latest_n1: float | None = None
     latest_n2: float | None = None

@@ -128,9 +128,15 @@ async def get_commission_dashboard(
 
     student_rows = (await db.execute(stmt)).all()
 
+    student_ids = [row.student_id for row in student_rows]
+    user_map: dict[uuid.UUID, User] = {}
+    if student_ids:
+        user_stmt = select(User).where(User.id.in_(student_ids))
+        users = (await db.execute(user_stmt)).scalars().all()
+        user_map = {u.id: u for u in users}
+
     student_summaries: list[StudentSummary] = []
     for row in student_rows:
-        # Get most recent metrics for this student in this commission/exercise scope
         student_metrics, _ = await metrics_repo.get_by_student(
             student_id=row.student_id, page=1, per_page=1
         )
@@ -139,9 +145,12 @@ async def get_commission_dashboard(
         def _f(v: Any) -> float | None:
             return float(v) if v is not None else None
 
+        user = user_map.get(row.student_id)
         student_summaries.append(
             StudentSummary(
                 student_id=str(row.student_id),
+                student_name=user.full_name if user else None,
+                student_email=user.email if user else None,
                 session_count=row.session_count,
                 latest_n1=_f(getattr(latest, "n1_comprehension_score", None)) if latest else None,
                 latest_n2=_f(getattr(latest, "n2_strategy_score", None)) if latest else None,

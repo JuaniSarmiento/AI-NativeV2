@@ -1,5 +1,7 @@
 export interface StudentSummary {
   student_id: string;
+  student_name: string | null;
+  student_email: string | null;
   session_count: number;
   latest_n1: number | null;
   latest_n2: number | null;
@@ -24,13 +26,7 @@ export interface DashboardData {
   students: StudentSummary[];
 }
 
-export interface RadarDataPoint {
-  dimension: string;
-  score: number;
-  fullMark: 100;
-}
-
-export type SortField = 'latest_n1' | 'latest_n2' | 'latest_n3' | 'latest_n4' | 'latest_qe' | 'latest_risk_level';
+export type SortField = 'student_name' | 'session_count' | 'latest_qe' | 'latest_risk_level';
 export type SortDirection = 'asc' | 'desc';
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
@@ -49,11 +45,11 @@ export const RISK_LABELS: Record<RiskLevel, string> = {
   critical: 'Critico',
 };
 
-export const N4_LABELS: Record<string, string> = {
-  n1: 'Comprension',
-  n2: 'Estrategia',
-  n3: 'Validacion',
-  n4: 'Interaccion IA',
+export const RISK_DESCRIPTIONS: Record<RiskLevel, string> = {
+  low: 'Buen proceso cognitivo',
+  medium: 'Necesita seguimiento',
+  high: 'Requiere intervencion',
+  critical: 'Alerta inmediata',
 };
 
 export interface RiskAssessment {
@@ -70,7 +66,7 @@ export interface RiskAssessment {
 }
 
 export const RISK_FACTOR_LABELS: Record<string, string> = {
-  dependency: 'Dependencia',
+  dependency: 'Dependencia de IA',
   disengagement: 'Desvinculacion',
   stagnation: 'Estancamiento',
 };

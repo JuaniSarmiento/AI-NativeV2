@@ -55,6 +55,12 @@ export interface ChatMessage {
 
 export interface TraceData {
   session: TraceSession;
+  student_name: string | null;
+  student_email: string | null;
+  exercise_title: string | null;
+  timeline: TraceEvent[];
+  code_evolution: CodeSnapshot[];
+  chat: ChatMessage[];
   metrics: TraceMetrics | null;
   verification: VerifyResult | null;
 }

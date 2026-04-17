@@ -84,10 +84,20 @@ class QualityFactors:
 
 
 @dataclass(frozen=True)
+class CoherenceConfig:
+    """Thresholds for the CoherenceEngine (EPIC-20 Fase C)."""
+
+    external_integration_threshold_lines: int = 50
+    code_discourse_keywords_min_match: float = 0.3
+    generative_dominance_threshold: float = 0.6
+
+
+@dataclass(frozen=True)
 class RubricConfig:
     weights: RubricWeights = field(default_factory=RubricWeights)
     risk_thresholds: RiskThresholds = field(default_factory=RiskThresholds)
     quality_factors: QualityFactors = field(default_factory=QualityFactors)
+    coherence: CoherenceConfig = field(default_factory=CoherenceConfig)
 
 
 def _parse_yaml(data: dict) -> RubricConfig:  # type: ignore[type-arg]
@@ -135,10 +145,24 @@ def _parse_yaml(data: dict) -> RubricConfig:  # type: ignore[type-arg]
         n4=_qfactor(qf.get("n4", {})),
     )
 
+    coh = data.get("coherence", {})
+    coherence = CoherenceConfig(
+        external_integration_threshold_lines=int(
+            coh.get("external_integration_threshold_lines", 50)
+        ),
+        code_discourse_keywords_min_match=float(
+            coh.get("code_discourse_keywords_min_match", 0.3)
+        ),
+        generative_dominance_threshold=float(
+            coh.get("generative_dominance_threshold", 0.6)
+        ),
+    )
+
     return RubricConfig(
         weights=weights,
         risk_thresholds=risk_thresholds,
         quality_factors=quality_factors,
+        coherence=coherence,
     )
 
 
