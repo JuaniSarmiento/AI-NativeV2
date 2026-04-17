@@ -4,8 +4,6 @@ import abc
 from dataclasses import dataclass
 from typing import AsyncIterator
 
-import anthropic
-
 from app.config import get_settings
 from app.core.exceptions import DomainError
 from app.core.logging import get_logger
@@ -112,6 +110,15 @@ class LLMAdapter(abc.ABC):
 class AnthropicAdapter(LLMAdapter):
     def __init__(self) -> None:
         settings = get_settings()
+
+        try:
+            import anthropic  # type: ignore
+        except ModuleNotFoundError as exc:
+            raise LLMUnavailableError(
+                message="Anthropic SDK is not installed. Install 'anthropic' or use TUTOR_LLM_PROVIDER=mistral.",
+            ) from exc
+
+        self._anthropic = anthropic
         self._client = anthropic.AsyncAnthropic(
             api_key=settings.anthropic_api_key,
             timeout=settings.anthropic_timeout_seconds,
@@ -155,13 +162,13 @@ class AnthropicAdapter(LLMAdapter):
                     output_tokens=response.usage.output_tokens,
                 )
 
-        except anthropic.RateLimitError as exc:
+        except self._anthropic.RateLimitError as exc:
             logger.warning("Anthropic rate limit hit", extra={"error": str(exc)})
             raise LLMRateLimitError() from exc
-        except (anthropic.APIConnectionError, anthropic.APITimeoutError) as exc:
+        except (self._anthropic.APIConnectionError, self._anthropic.APITimeoutError) as exc:
             logger.error("Anthropic unavailable", extra={"error": str(exc)})
             raise LLMUnavailableError() from exc
-        except anthropic.APIError as exc:
+        except self._anthropic.APIError as exc:
             logger.error("Anthropic API error", extra={"status": exc.status_code, "error": str(exc)})
             raise LLMError(message=f"LLM error: {exc.message}") from exc
 
