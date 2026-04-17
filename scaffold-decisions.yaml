@@ -18,13 +18,13 @@ stack:
     language: "python"
     framework: "fastapi"
     orm: "sqlalchemy-2.0-async"
-    port: 8000
+    port: 8001
   frontend:
     framework: "react-19"
     state_management: "zustand-5"
     styling: "tailwindcss-4"
     bundler: "vite"
-    port: 5173
+    port: 5174
   database:
     primary: "postgresql"
     cache: "redis"
@@ -111,7 +111,7 @@ security:
   compliance:
     - "gobernanza interna empate3"
   cors_origins:
-    - "http://localhost:5173"
+    - "http://localhost:5174"
   secrets_management: "env vars (dev), docker secrets (prod)"
   sandbox:
     timeout: "10s"

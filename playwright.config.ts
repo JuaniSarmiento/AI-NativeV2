@@ -6,7 +6,7 @@ export default defineConfig({
   retries: 0,
   workers: 1, // Sequential — tests depend on each other
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: 'http://localhost:5174',
     headless: true,
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',

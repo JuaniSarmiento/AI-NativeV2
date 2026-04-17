@@ -11,7 +11,7 @@ test.describe('Security Tests', () => {
   });
 
   test('unauthenticated request returns 401', async () => {
-    const res = await fetch('http://localhost:8000/api/v1/courses', {
+    const res = await fetch('http://localhost:8001/api/v1/courses', {
       headers: { Authorization: 'Bearer invalid-token' },
     });
     expect(res.status).toBe(401);

@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     database_url: str = Field(..., alias="DATABASE_URL")
 
     # --- Redis ---
-    redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
+    redis_url: str = Field(default="redis://localhost:6380/0", alias="REDIS_URL")
 
     # --- Anthropic ---
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
@@ -45,7 +45,7 @@ class Settings(BaseSettings):
 
     # --- CORS ---
     cors_origins: list[str] = Field(
-        default=["http://localhost:5173"], alias="CORS_ORIGINS"
+        default=["http://localhost:5174"], alias="CORS_ORIGINS"
     )
 
     # --- JWT ---
@@ -72,7 +72,7 @@ class Settings(BaseSettings):
 
     # --- Server ---
     backend_host: str = Field(default="0.0.0.0", alias="BACKEND_HOST")
-    backend_port: int = Field(default=8000, alias="BACKEND_PORT")
+    backend_port: int = Field(default=8001, alias="BACKEND_PORT")
     backend_workers: int = Field(default=1, alias="BACKEND_WORKERS")
 
     @field_validator("cors_origins", mode="before")

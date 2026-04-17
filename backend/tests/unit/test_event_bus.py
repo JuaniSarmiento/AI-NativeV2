@@ -18,7 +18,7 @@ from app.core.event_bus import STREAMS, EventBus
 # ---------------------------------------------------------------------------
 
 
-def _make_bus(redis_url: str = "redis://localhost:6379/0") -> EventBus:
+def _make_bus(redis_url: str = "redis://localhost:6380/0") -> EventBus:
     return EventBus(redis_url=redis_url)
 
 

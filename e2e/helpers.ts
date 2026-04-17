@@ -1,6 +1,6 @@
 import { type Page, expect } from '@playwright/test';
 
-const API = 'http://localhost:8000/api/v1';
+const API = 'http://localhost:8001/api/v1';
 
 /** Register a user via API and return the user data */
 export async function registerUser(

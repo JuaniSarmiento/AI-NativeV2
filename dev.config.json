@@ -32,10 +32,10 @@
     "ci": "github-actions"
   },
   "ports": {
-    "backend": 8000,
-    "frontend": 5173,
-    "database": 5432,
-    "redis": 6379
+    "backend": 8001,
+    "frontend": 5174,
+    "database": 5433,
+    "redis": 6380
   },
   "timeline": {
     "phase_0": "Semanas 1-2 (todos juntos)",

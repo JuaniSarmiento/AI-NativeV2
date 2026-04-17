@@ -4,7 +4,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile.prod
     ports:
-      - "8000:8000"
+      - "8001:8001"
     depends_on:
       db:
         condition: service_healthy
@@ -17,7 +17,7 @@ services:
       REDIS_URL: redis://redis:6379/0
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -46,7 +46,7 @@ services:
   db:
     image: postgres:16-alpine
     ports:
-      - "5432:5432"
+      - "5433:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-ainative}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ainative}
@@ -66,7 +66,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis-data:/data
     command: redis-server --appendonly yes

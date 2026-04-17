@@ -30,7 +30,7 @@ _DEFAULT_TEST_DB = os.environ.get(
     "TEST_DATABASE_URL",
     os.environ.get(
         "DATABASE_URL",
-        "postgresql+asyncpg://ainative:ainative@localhost:5432/ainative",
+        "postgresql+asyncpg://ainative:ainative@localhost:5433/ainative",
     ),
 )
 

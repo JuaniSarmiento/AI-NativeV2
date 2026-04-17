@@ -20,11 +20,11 @@ RUN pip install --no-cache-dir --upgrade pip \
 COPY . .
 
 # ---- Runtime ----
-EXPOSE 8000
+EXPOSE 8001
 
 # The --factory flag tells uvicorn to call create_app() to get the ASGI app.
 # --reload watches for file changes — useful in development with a bind mount.
 CMD ["uvicorn", "app.main:create_app", "--factory", \
      "--host", "0.0.0.0", \
-     "--port", "8000", \
+     "--port", "8001", \
      "--reload"]
