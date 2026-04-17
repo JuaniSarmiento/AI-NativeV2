@@ -144,8 +144,6 @@ export default function TeacherDashboard() {
     navigate(`/teacher/students/${studentId}/activity?commission=${commissionId}`);
   };
 
-  const commissionName = commissions.find((c) => c.id === commissionId)?.name ?? '';
-
   return (
     <div className="mx-auto max-w-6xl space-y-8 px-4 py-6">
       {/* Header */}

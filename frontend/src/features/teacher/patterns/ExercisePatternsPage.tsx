@@ -5,7 +5,6 @@ import { apiClient } from '@/shared/lib/api-client';
 import StrategyDistribution from './StrategyDistribution';
 import ErrorPatternsSummary from './ErrorPatternsSummary';
 import type { PatternSession } from './types';
-import { RISK_LABELS, type RiskLevel } from '@/features/teacher/dashboard/types';
 
 interface CommissionOption { id: string; name: string; year: number; semester: number; }
 

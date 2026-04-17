@@ -33,7 +33,7 @@ export default function StudentProgress() {
   }, [fetchProgress]);
 
   const sessions = progress?.sessions ?? EMPTY_SESSIONS;
-  const { latest, previous } = getLastTwo(sessions);
+  const { previous } = getLastTwo(sessions);
 
   const cards: ScoreCardData[] = [
     {

@@ -35,7 +35,7 @@ export const useGovernanceStore = create<GovernanceState>((set) => ({
       const res = await apiClient.get<GovernanceEvent[]>(path);
       set({
         events: res.data,
-        eventsTotal: (res.meta as Record<string, number>)?.total ?? 0,
+        eventsTotal: res.meta?.total ?? 0,
       });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Error cargando eventos' });
@@ -50,7 +50,7 @@ export const useGovernanceStore = create<GovernanceState>((set) => ({
       const res = await apiClient.get<PromptHistory[]>(`/v1/governance/prompts?page=${page}&per_page=20`);
       set({
         prompts: res.data,
-        promptsTotal: (res.meta as Record<string, number>)?.total ?? 0,
+        promptsTotal: res.meta?.total ?? 0,
       });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Error cargando prompts' });

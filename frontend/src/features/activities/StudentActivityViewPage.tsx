@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { useActivitiesStore } from './store';
 import { useRunCode } from '@/features/sandbox/useRunCode';
 import { useAutoSnapshot } from '@/features/submissions/useAutoSnapshot';
@@ -29,7 +29,6 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
 
 export default function StudentActivityViewPage() {
   const { activityId } = useParams<{ activityId: string }>();
-  const navigate = useNavigate();
   const activity = useActivitiesStore((s) => s.currentActivity);
   const isLoading = useActivitiesStore((s) => s.isLoading);
   const fetchActivity = useActivitiesStore((s) => s.fetchActivity);
@@ -461,7 +460,7 @@ export default function StudentActivityViewPage() {
             Despues de enviar, el docente va a poder ver tu trabajo.
           </p>
           <div className="space-y-2">
-            {activeExercises.map((ex, i) => {
+            {activeExercises.map((ex) => {
               const hasCode = (codes[ex.id] || '').trim().length > 0;
               return (
                 <div key={ex.id} className="flex items-center gap-2 text-[0.8125rem]">

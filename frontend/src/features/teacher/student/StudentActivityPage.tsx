@@ -351,15 +351,21 @@ function SessionDetail({ trace }: { trace: TraceData }) {
                     <span className="text-xs font-medium text-[var(--color-text-primary)]">
                       {EVENT_TYPE_LABELS[evt.event_type] ?? evt.event_type}
                     </span>
-                    {evt.event_type === 'code.run' && evt.payload.status && (
+
+                    {(() => {
+                      const rawStatus = evt.payload.status;
+                      const status = typeof rawStatus === 'string' ? rawStatus : null;
+                      if (evt.event_type !== 'code.run' || !status) return null;
+                      return (
                       <span className={`ml-1.5 text-[0.625rem] ${
-                        evt.payload.status === 'ok' || evt.payload.status === 'success'
+                        status === 'ok' || status === 'success'
                           ? 'text-[var(--color-success-600)]'
                           : 'text-[var(--color-error-600)]'
                       }`}>
-                        {String(evt.payload.status)}
+                        {status}
                       </span>
-                    )}
+                      );
+                    })()}
                     <p className="text-[0.625rem] text-[var(--color-text-tertiary)]">
                       {new Date(evt.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                       {' — seq #{' + evt.sequence_number + '}'}

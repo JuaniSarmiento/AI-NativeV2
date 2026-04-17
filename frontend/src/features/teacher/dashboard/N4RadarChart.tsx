@@ -7,8 +7,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import type { DashboardData, StudentSummary, RadarDataPoint } from './types';
-import { N4_LABELS } from './types';
+import { N4_LABELS, type DashboardData, type RadarDataPoint, type StudentSummary } from './types';
 
 interface N4RadarChartProps {
   dashboard: DashboardData;
@@ -24,7 +23,7 @@ function buildRadarData(
     { key: 'n2', avgField: 'avg_n2' as const, studentField: 'latest_n2' as const },
     { key: 'n3', avgField: 'avg_n3' as const, studentField: 'latest_n3' as const },
     { key: 'n4', avgField: 'avg_n4' as const, studentField: 'latest_n4' as const },
-  ];
+  ] as const;
 
   return dimensions.map(({ key, avgField, studentField }) => ({
     dimension: N4_LABELS[key],

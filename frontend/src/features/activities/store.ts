@@ -19,7 +19,7 @@ interface ActivitiesState {
   saveLLMConfig: (data: LLMConfigSaveData) => Promise<void>;
 }
 
-export const useActivitiesStore = create<ActivitiesState>((set, get) => ({
+export const useActivitiesStore = create<ActivitiesState>((set) => ({
   activities: [],
   currentActivity: null,
   llmConfig: null,

@@ -6,7 +6,6 @@ import Button from '@/shared/components/Button';
 import Input from '@/shared/components/Input';
 import Card from '@/shared/components/Card';
 import Modal from '@/shared/components/Modal';
-import type { Course, CourseCreateData } from './types';
 
 export default function CoursesPage() {
   const role = useAuthStore((s) => s.user?.role);

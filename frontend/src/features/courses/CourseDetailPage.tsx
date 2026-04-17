@@ -8,7 +8,7 @@ import Button from '@/shared/components/Button';
 import Input from '@/shared/components/Input';
 import Card from '@/shared/components/Card';
 import Modal from '@/shared/components/Modal';
-import type { Course, Commission } from './types';
+import type { Course } from './types';
 import type { Activity } from '@/features/activities/types';
 
 export default function CourseDetailPage() {

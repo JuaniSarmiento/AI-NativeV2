@@ -26,7 +26,29 @@ export interface DashboardData {
   students: StudentSummary[];
 }
 
-export type SortField = 'student_name' | 'session_count' | 'latest_qe' | 'latest_risk_level';
+export interface RadarDataPoint {
+  dimension: string;
+  score: number;
+  studentScore?: number;
+  fullMark: number;
+}
+
+export const N4_LABELS: Record<'n1' | 'n2' | 'n3' | 'n4', string> = {
+  n1: 'Comprension',
+  n2: 'Estrategia',
+  n3: 'Validacion',
+  n4: 'Interaccion IA',
+};
+
+export type SortField =
+  | 'student_name'
+  | 'session_count'
+  | 'latest_n1'
+  | 'latest_n2'
+  | 'latest_n3'
+  | 'latest_n4'
+  | 'latest_qe'
+  | 'latest_risk_level';
 export type SortDirection = 'asc' | 'desc';
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
