@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { apiClient } from '@/shared/lib/api-client';
-import type { TraceData, TraceSession, TraceMetrics, TraceEvent, VerifyResult, CodeSnapshot, ChatMessage } from './types';
+import type { TraceData, TraceSession, TraceMetrics, TraceEvent, VerifyResult, CodeSnapshot, ChatMessage, TraceAnomaly } from './types';
 
 const EMPTY_EVENTS: TraceEvent[] = [];
 const EMPTY_SNAPSHOTS: CodeSnapshot[] = [];
@@ -16,12 +16,15 @@ interface TraceState {
   verification: VerifyResult | null;
   snapshots: CodeSnapshot[];
   chatMessages: ChatMessage[];
+  anomalies: TraceAnomaly[];
   isLoading: boolean;
   error: string | null;
 
   fetchTrace: (sessionId: string) => Promise<void>;
   clear: () => void;
 }
+
+const EMPTY_ANOMALIES: TraceAnomaly[] = [];
 
 export const useTraceStore = create<TraceState>((set) => ({
   session: null,
@@ -33,6 +36,7 @@ export const useTraceStore = create<TraceState>((set) => ({
   verification: null,
   snapshots: EMPTY_SNAPSHOTS,
   chatMessages: EMPTY_MESSAGES,
+  anomalies: EMPTY_ANOMALIES,
   isLoading: false,
   error: null,
 
@@ -52,6 +56,7 @@ export const useTraceStore = create<TraceState>((set) => ({
         verification: trace.verification,
         snapshots: trace.code_evolution ?? EMPTY_SNAPSHOTS,
         chatMessages: trace.chat ?? EMPTY_MESSAGES,
+        anomalies: trace.anomalies ?? EMPTY_ANOMALIES,
       });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Error cargando traza' });
@@ -71,6 +76,7 @@ export const useTraceStore = create<TraceState>((set) => ({
       verification: null,
       snapshots: EMPTY_SNAPSHOTS,
       chatMessages: EMPTY_MESSAGES,
+      anomalies: EMPTY_ANOMALIES,
       isLoading: false,
       error: null,
     }),

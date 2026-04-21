@@ -93,11 +93,22 @@ class CoherenceConfig:
 
 
 @dataclass(frozen=True)
+class QeWeightsConfig:
+    """Per-level weights for the Qe composite score (B9)."""
+
+    n1: float = 0.25
+    n2: float = 0.25
+    n3: float = 0.25
+    n4: float = 0.25
+
+
+@dataclass(frozen=True)
 class RubricConfig:
     weights: RubricWeights = field(default_factory=RubricWeights)
     risk_thresholds: RiskThresholds = field(default_factory=RiskThresholds)
     quality_factors: QualityFactors = field(default_factory=QualityFactors)
     coherence: CoherenceConfig = field(default_factory=CoherenceConfig)
+    qe_weights: QeWeightsConfig = field(default_factory=QeWeightsConfig)
 
 
 def _parse_yaml(data: dict) -> RubricConfig:  # type: ignore[type-arg]
@@ -158,11 +169,20 @@ def _parse_yaml(data: dict) -> RubricConfig:  # type: ignore[type-arg]
         ),
     )
 
+    qw = data.get("qe_weights", {})
+    qe_weights = QeWeightsConfig(
+        n1=float(qw.get("n1", 0.25)),
+        n2=float(qw.get("n2", 0.25)),
+        n3=float(qw.get("n3", 0.25)),
+        n4=float(qw.get("n4", 0.25)),
+    )
+
     return RubricConfig(
         weights=weights,
         risk_thresholds=risk_thresholds,
         quality_factors=quality_factors,
         coherence=coherence,
+        qe_weights=qe_weights,
     )
 
 

@@ -29,6 +29,9 @@ from app.features.evaluation.schemas import (
     CognitiveMetricsResponse,
     DashboardResponse,
     DashboardStandardResponse,
+    EvolutionItem,
+    EvolutionResponse,
+    EvolutionStandardResponse,
     MetaBlock,
     MetricsStandardResponse,
     StudentProfileResponse,
@@ -44,6 +47,49 @@ from app.shared.models.user import User
 logger = get_logger(__name__)
 
 router = APIRouter(tags=["evaluation"])
+
+
+# ---------------------------------------------------------------------------
+# Domain helpers (pure functions — no FastAPI imports)
+# ---------------------------------------------------------------------------
+
+
+def _derive_appropriation_type(prompt_type_distribution: dict | None) -> str | None:
+    """Derive AI appropriation type from prompt_type_distribution counts.
+
+    Rules (in priority order):
+    1. No tutor interactions at all → "autonomo"
+    2. generative > 60 % of total → "delegacion"
+    3. exploratory > 40 % AND verifier > 10 % → "reflexiva"
+    4. Else → "superficial"
+
+    Args:
+        prompt_type_distribution: JSONB dict like
+            {"exploratory": N, "verifier": M, "generative": K}
+            where N, M, K are integer counts.  May be None.
+
+    Returns:
+        One of "delegacion", "superficial", "reflexiva", "autonomo", or None
+        when the distribution is None (metrics not yet computed).
+    """
+    if prompt_type_distribution is None:
+        return None
+
+    exploratory = int(prompt_type_distribution.get("exploratory") or 0)
+    verifier = int(prompt_type_distribution.get("verifier") or 0)
+    generative = int(prompt_type_distribution.get("generative") or 0)
+    total = exploratory + verifier + generative
+
+    if total == 0:
+        return "autonomo"
+
+    if generative / total > 0.60:
+        return "delegacion"
+
+    if exploratory / total > 0.40 and verifier / total > 0.10:
+        return "reflexiva"
+
+    return "superficial"
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +192,7 @@ async def get_commission_dashboard(
             return float(v) if v is not None else None
 
         user = user_map.get(row.student_id)
+        prompt_dist = getattr(latest, "prompt_type_distribution", None) if latest else None
         student_summaries.append(
             StudentSummary(
                 student_id=str(row.student_id),
@@ -159,13 +206,19 @@ async def get_commission_dashboard(
                 latest_qe=_f(getattr(latest, "qe_score", None)) if latest else None,
                 latest_risk_level=getattr(latest, "risk_level", None) if latest else None,
                 avg_dependency=_f(getattr(latest, "dependency_score", None)) if latest else None,
+                # Coherence and appropriation fields (EPIC-20 Fase C)
+                latest_temporal_coherence=_f(getattr(latest, "temporal_coherence_score", None)) if latest else None,
+                latest_code_discourse=_f(getattr(latest, "code_discourse_score", None)) if latest else None,
+                latest_inter_iteration=_f(getattr(latest, "inter_iteration_score", None)) if latest else None,
+                latest_appropriation_type=_derive_appropriation_type(prompt_dist),
+                latest_score_breakdown=getattr(latest, "score_breakdown", None) if latest else None,
             )
         )
 
     dashboard = DashboardResponse(
         commission_id=str(commission_id),
         exercise_id=str(exercise_id) if exercise_id else None,
-        student_count=aggregates["student_count"],
+        student_count=len(student_summaries),
         avg_n1=aggregates["avg_n1"],
         avg_n2=aggregates["avg_n2"],
         avg_n3=aggregates["avg_n3"],
@@ -314,4 +367,101 @@ async def get_my_progress(
             "total": total,
             "total_pages": max(1, (total + per_page - 1) // per_page),
         },
+    )
+
+
+# ---------------------------------------------------------------------------
+# 5. GET /api/v1/cognitive/students/{student_id}/evolution
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/api/v1/cognitive/students/{student_id}/evolution",
+    response_model=EvolutionStandardResponse,
+    summary="Cognitive evolution for a student within a commission",
+    description=(
+        "Returns the chronological sequence of N1-N4 snapshots for a student "
+        "filtered by commission. Each entry maps to one closed CognitiveSession "
+        "and includes the exercise title for display. "
+        "Requires role docente or admin."
+    ),
+)
+async def get_student_evolution(
+    student_id: uuid.UUID,
+    commission_id: uuid.UUID = Query(..., description="Commission UUID to scope the query"),
+    db: AsyncSession = Depends(get_async_session),
+    _user: User = require_role("docente", "admin"),
+) -> EvolutionStandardResponse:
+    from sqlalchemy import select
+    from app.features.cognitive.models import CognitiveSession
+    from app.features.evaluation.models import CognitiveMetrics
+    from app.shared.models.exercise import Exercise
+
+    # Fetch all sessions for this student+commission, ordered by started_at ASC
+    session_stmt = (
+        select(CognitiveSession)
+        .where(
+            CognitiveSession.student_id == student_id,
+            CognitiveSession.commission_id == commission_id,
+        )
+        .order_by(CognitiveSession.started_at.asc())
+    )
+    sessions = list((await db.execute(session_stmt)).scalars().all())
+
+    if not sessions:
+        return EvolutionStandardResponse(
+            status="ok",
+            data=EvolutionResponse(
+                student_id=str(student_id),
+                commission_id=str(commission_id),
+                items=[],
+            ),
+        )
+
+    session_ids = [s.id for s in sessions]
+    session_map = {s.id: s for s in sessions}
+
+    # Fetch metrics for all those sessions in one query
+    metrics_stmt = select(CognitiveMetrics).where(
+        CognitiveMetrics.session_id.in_(session_ids)
+    )
+    metrics_rows = list((await db.execute(metrics_stmt)).scalars().all())
+    metrics_by_session: dict[uuid.UUID, CognitiveMetrics] = {
+        m.session_id: m for m in metrics_rows
+    }
+
+    # Fetch exercise titles in one query
+    exercise_ids = list({s.exercise_id for s in sessions})
+    title_map: dict[uuid.UUID, str] = {}
+    if exercise_ids:
+        ex_stmt = select(Exercise.id, Exercise.title).where(Exercise.id.in_(exercise_ids))
+        for row in (await db.execute(ex_stmt)):
+            title_map[row.id] = row.title
+
+    def _f(v: Any) -> float | None:
+        return float(v) if v is not None else None
+
+    items = [
+        EvolutionItem(
+            session_id=str(sess.id),
+            exercise_id=str(sess.exercise_id),
+            exercise_title=title_map.get(sess.exercise_id),
+            started_at=sess.started_at,
+            n1=_f(getattr(metrics_by_session.get(sess.id), "n1_comprehension_score", None)),
+            n2=_f(getattr(metrics_by_session.get(sess.id), "n2_strategy_score", None)),
+            n3=_f(getattr(metrics_by_session.get(sess.id), "n3_validation_score", None)),
+            n4=_f(getattr(metrics_by_session.get(sess.id), "n4_ai_interaction_score", None)),
+            qe=_f(getattr(metrics_by_session.get(sess.id), "qe_score", None)),
+            risk_level=getattr(metrics_by_session.get(sess.id), "risk_level", None),
+        )
+        for sess in sessions
+    ]
+
+    return EvolutionStandardResponse(
+        status="ok",
+        data=EvolutionResponse(
+            student_id=str(student_id),
+            commission_id=str(commission_id),
+            items=items,
+        ),
     )

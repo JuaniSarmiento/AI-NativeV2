@@ -1,9 +1,13 @@
 """GuardrailsProcessor — post-LLM response analysis for the socratic tutor.
 
 Detects responses that violate pedagogical constraints:
-- excessive_code: too many lines of code across all fenced blocks
-- direct_solution: complete function/class definitions inside code blocks
-- non_socratic: code blocks present but no guiding questions in the response
+- excessive_code:   too many lines of code across all fenced blocks
+- direct_solution:  complete function/class definitions inside code blocks
+- non_socratic:     code blocks present but no guiding questions in the response
+
+Audit-only guardrails (log but never block):
+- GP3: verify tutor response references the student's actual code identifiers
+- GP5: verify debugging responses include a concrete test-case suggestion
 """
 from __future__ import annotations
 
@@ -19,6 +23,16 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 _DEFAULT_MAX_CODE_LINES = 5
+
+# Python keywords and common builtins excluded from GP3 identifier matching
+_STOP_WORDS: frozenset[str] = frozenset({
+    "def", "class", "import", "from", "return", "print",
+    "True", "False", "None", "self", "pass", "for", "while",
+    "if", "else", "elif", "try", "except", "with", "as",
+    "in", "not", "and", "or", "is", "lambda", "yield",
+    "raise", "break", "continue", "del", "global", "nonlocal",
+    "assert", "async", "await",
+})
 
 # Regex to extract fenced code blocks (``` ... ```)
 _FENCED_CODE_BLOCK_RE = re.compile(
@@ -100,10 +114,22 @@ class GuardrailsProcessor:
     # Public API
     # ------------------------------------------------------------------
 
-    def analyze(self, response_text: str) -> GuardrailResult:
+    def analyze(
+        self,
+        response_text: str,
+        *,
+        student_code: str | None = None,
+    ) -> GuardrailResult:
         """Analyse *response_text* and return a :class:`GuardrailResult`.
 
-        Returns :py:meth:`GuardrailResult.ok` when no violation is detected.
+        Returns :py:meth:`GuardrailResult.ok` when no blocking violation is
+        detected.
+
+        Args:
+            response_text: The LLM assistant response to evaluate.
+            student_code:  Optional student source code submitted alongside
+                           the chat turn.  When provided, the GP3 audit check
+                           is activated.
         """
         if not response_text or not response_text.strip():
             return GuardrailResult.ok()
@@ -133,6 +159,11 @@ class GuardrailsProcessor:
                 extra={"details": result.violation_details},
             )
             return result
+
+        # Audit-only guardrails (non-blocking)
+        if student_code:
+            self._check_gp3_code_reference(response_text, student_code)
+        self._check_gp5_test_suggestion(response_text)
 
         return GuardrailResult.ok()
 
@@ -201,6 +232,86 @@ class GuardrailsProcessor:
             )
 
         return GuardrailResult.ok()
+
+    # ------------------------------------------------------------------
+    # Audit-only guardrails (GP3, GP5) — log but never block
+    # ------------------------------------------------------------------
+
+    def _check_gp3_code_reference(self, response_text: str, student_code: str) -> None:
+        """GP3 audit: verify the tutor response references student's actual code.
+
+        Extracts meaningful identifiers (variable and function names) from
+        *student_code*, then checks whether the response mentions at least one
+        of them.  Logs an info-level event when none are referenced.
+
+        This check is audit-only — it never blocks or modifies the response.
+        """
+        student_identifiers = set(re.findall(r"\b([a-zA-Z_]\w{2,})\b", student_code))
+        student_identifiers -= _STOP_WORDS
+        # Also strip short builtins and common one-word tokens under 3 chars
+        student_identifiers = {
+            ident for ident in student_identifiers if len(ident) >= 3
+        }
+
+        if not student_identifiers:
+            return
+
+        response_lower = response_text.lower()
+        referenced = any(ident.lower() in response_lower for ident in student_identifiers)
+
+        if not referenced:
+            logger.info(
+                "GP3 audit: tutor response does not reference student code",
+                extra={"student_identifiers_sample": list(student_identifiers)[:5]},
+            )
+
+    def _check_gp5_test_suggestion(self, response_text: str) -> None:
+        """GP5 audit: verify debugging responses include a concrete test case.
+
+        Only activates when *response_text* contains debugging indicators
+        (error/bug/traceback keywords in Spanish or English).  If it does but
+        no concrete test-value suggestion is found, an info-level event is
+        logged.
+
+        This check is audit-only — it never blocks or modifies the response.
+        """
+        # Specific debugging vocabulary — "problema" excluded (too broad: "subproblemas", etc.)
+        # Use word boundaries to prevent substring false-positives.
+        _debug_indicator_patterns = [
+            r"\berror\b",
+            r"\bbug\b",
+            r"\bfalla\b",
+            r"\btraceback\b",
+            r"\bexception\b",
+            r"no\s+funciona",
+            r"no\s+anda",
+        ]
+        is_debugging = any(
+            re.search(p, response_text, re.IGNORECASE)
+            for p in _debug_indicator_patterns
+        )
+
+        if not is_debugging:
+            return
+
+        test_patterns = [
+            r"prob[aá]\s+con",
+            r"(?:qué|que)\s+pasa\s+(?:si|cuando)",
+            r"intent[aá]\s+con",
+            r"us[aá]\s+(?:el|los|este|estos)\s+(?:valor|dato|caso|ejemplo)",
+            r"test(?:eá|ea)\s+con",
+            r"\[[\d,\s]+\]",               # concrete list like [3, 1, 2]
+            r"(?:por ejemplo|for example)",
+        ]
+
+        has_test = any(
+            re.search(p, response_text, re.IGNORECASE) for p in test_patterns
+        )
+
+        if not has_test:
+            logger.info(
+                "GP5 audit: debugging response lacks concrete test suggestion",
+            )
 
     # ------------------------------------------------------------------
     # Corrective messages

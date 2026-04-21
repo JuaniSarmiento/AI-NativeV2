@@ -3,12 +3,14 @@ from __future__ import annotations
 import math
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.features.auth.dependencies import require_role
 from app.features.governance.schemas import (
+    CreatePromptRequest,
+    CreatePromptResponse,
     GovernanceEventResponse,
     GovernanceEventsListResponse,
     GovernanceEventsMeta,
@@ -112,4 +114,65 @@ async def list_prompts(
         meta=GovernanceEventsMeta(
             page=page, per_page=per_page, total=total, total_pages=total_pages,
         ),
+    )
+
+
+@router.post(
+    "/prompts",
+    response_model=CreatePromptResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new system prompt with semantic versioning",
+)
+async def create_prompt(
+    body: CreatePromptRequest,
+    session: AsyncSession = Depends(get_async_session),
+    service: GovernanceService = Depends(get_governance_service),
+    current_user: User = require_role("admin"),
+) -> CreatePromptResponse:
+    import hashlib
+    from sqlalchemy import select
+    from app.features.tutor.models import TutorSystemPrompt
+
+    if body.change_type:
+        active_stmt = (
+            select(TutorSystemPrompt)
+            .where(TutorSystemPrompt.is_active.is_(True))
+            .order_by(TutorSystemPrompt.created_at.desc())
+            .limit(1)
+        )
+        active_result = await session.execute(active_stmt)
+        active_prompt = active_result.scalar_one_or_none()
+        previous_version = active_prompt.version if active_prompt else None
+
+        GovernanceService.validate_prompt_version(
+            body.version, previous_version, body.change_type,
+        )
+
+    sha256_hash = hashlib.sha256(body.content.encode("utf-8")).hexdigest()
+
+    prompt = TutorSystemPrompt(
+        name=body.name,
+        content=body.content,
+        version=body.version,
+        sha256_hash=sha256_hash,
+        is_active=False,
+        created_by=current_user.id,
+        change_type=body.change_type,
+        change_justification=body.change_justification,
+    )
+    session.add(prompt)
+    await session.flush()
+
+    await service.record_prompt_created(
+        prompt_id=prompt.id,
+        name=prompt.name,
+        version=prompt.version,
+        sha256_hash=sha256_hash,
+        created_by=current_user.id,
+        change_type=body.change_type,
+        change_justification=body.change_justification,
+    )
+
+    return CreatePromptResponse(
+        data=PromptHistoryResponse.from_orm_uuid(prompt),
     )

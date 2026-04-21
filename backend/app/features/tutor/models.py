@@ -150,6 +150,16 @@ class TutorSystemPrompt(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+    change_type: Mapped[str | None] = mapped_column(
+        String(10),
+        nullable=True,
+        comment="Semantic version change type: major, minor, or patch",
+    )
+    change_justification: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+        comment="Justification for the prompt version change",
+    )
 
     @staticmethod
     def compute_hash(content: str) -> str:

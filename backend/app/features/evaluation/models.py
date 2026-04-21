@@ -168,6 +168,18 @@ class CognitiveMetrics(Base):
         comment="Distribution of prompt types: {exploratory: N, verifier: N, generative: N}",
     )
 
+    # --- Score breakdown ---
+    score_breakdown: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Per-N condition details: {n1: [{condition, met, points}...], n2: [...], ...}",
+    )
+    engine_version: Mapped[str | None] = mapped_column(
+        String(10),
+        nullable=True,
+        comment="Version of MetricsEngine that produced these scores",
+    )
+
     # --- Risk classification ---
     risk_level: Mapped[str | None] = mapped_column(
         String(20),

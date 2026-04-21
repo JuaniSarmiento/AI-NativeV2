@@ -17,11 +17,18 @@ _EVENT_TYPE_MAPPING: dict[str, tuple[str, int | None]] = {
     "reads_problem": ("reads_problem", 1),
     "code.executed": ("code.run", 3),
     "code.execution.failed": ("code.run", 3),
-    "code.snapshot.captured": ("code.snapshot", 1),
-    "exercise.submitted": ("submission.created", 2),
+    "code.snapshot.captured": ("code.snapshot", None),
+    "exercise.submitted": ("submission.created", None),
     "tutor.session.started": ("session.started", None),
     "tutor.session.ended": ("session.closed", None),
-    "reflection.submitted": ("reflection.submitted", 1),
+    "reflection.submitted": ("reflection.submitted", None),
+    "problem.reading_time": ("problem.reading_time", 1),
+    "problem.reread": ("problem.reread", 1),
+    "pseudocode.written": ("pseudocode.written", 2),
+    "code.accepted_from_tutor": ("code.accepted_from_tutor", 4),
+    "test.manual_case": ("test.manual_case", 3),
+    "prompt.reformulated": ("prompt.reformulated", 4),
+    "code.snapshot.auto": ("code.snapshot.auto", None),
 }
 
 

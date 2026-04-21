@@ -153,6 +153,12 @@ class StudentSummary(BaseModel):
     latest_qe: float | None = None
     latest_risk_level: str | None = None
     avg_dependency: float | None = None
+    # Coherence and appropriation fields (EPIC-20 Fase C)
+    latest_temporal_coherence: float | None = None
+    latest_code_discourse: float | None = None
+    latest_inter_iteration: float | None = None
+    latest_appropriation_type: str | None = None  # delegacion | superficial | reflexiva | autonomo
+    latest_score_breakdown: dict | None = None
 
 
 class DashboardResponse(BaseModel):
@@ -228,5 +234,42 @@ class StudentProgressStandardResponse(BaseModel):
 
     status: str = "ok"
     data: StudentProgressResponse
+    meta: dict[str, Any] = Field(default_factory=dict)
+    errors: list[dict[str, Any]] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Evolution endpoint DTOs (Task 6.6)
+# ---------------------------------------------------------------------------
+
+
+class EvolutionItem(BaseModel):
+    """One session entry in a student's cognitive evolution over time."""
+
+    session_id: str
+    exercise_id: str
+    exercise_title: str | None = None
+    started_at: datetime
+    n1: float | None = None
+    n2: float | None = None
+    n3: float | None = None
+    n4: float | None = None
+    qe: float | None = None
+    risk_level: str | None = None
+
+
+class EvolutionResponse(BaseModel):
+    """List of cognitive snapshots ordered by session start time."""
+
+    student_id: str
+    commission_id: str
+    items: list[EvolutionItem] = Field(default_factory=list)
+
+
+class EvolutionStandardResponse(BaseModel):
+    """Standard envelope: student cognitive evolution."""
+
+    status: str = "ok"
+    data: EvolutionResponse
     meta: dict[str, Any] = Field(default_factory=dict)
     errors: list[dict[str, Any]] = Field(default_factory=list)

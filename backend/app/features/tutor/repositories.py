@@ -66,6 +66,31 @@ class TutorInteractionRepository(BaseRepository[TutorInteraction]):
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_messages_for_cognitive_session(
+        self,
+        student_id: uuid.UUID,
+        exercise_id: uuid.UUID,
+        started_at: "datetime",
+        closed_at: "datetime | None" = None,
+        *,
+        limit: int = 200,
+    ) -> list[TutorInteraction]:
+        """Get tutor messages that fall within a cognitive session's time window."""
+        stmt = (
+            select(TutorInteraction)
+            .where(
+                TutorInteraction.student_id == student_id,
+                TutorInteraction.exercise_id == exercise_id,
+                TutorInteraction.created_at >= started_at,
+            )
+            .order_by(TutorInteraction.created_at.asc())
+            .limit(limit)
+        )
+        if closed_at is not None:
+            stmt = stmt.where(TutorInteraction.created_at <= closed_at)
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_session_message_count(self, session_id: uuid.UUID) -> int:
         stmt = (
             select(func.count())

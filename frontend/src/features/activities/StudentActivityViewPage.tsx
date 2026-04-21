@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useActivitiesStore } from './store';
 import { useRunCode } from '@/features/sandbox/useRunCode';
 import { useAutoSnapshot } from '@/features/submissions/useAutoSnapshot';
+import { useReadingTimeEmitter, useRereadEmitter } from '@/shared/hooks/useCognitiveEvents';
 import { apiClient } from '@/shared/lib/api-client';
 import Button from '@/shared/components/Button';
 import Card from '@/shared/components/Card';
@@ -52,6 +53,10 @@ export default function StudentActivityViewPage() {
   const currentExercise = activeExercises[currentIndex] ?? null;
   const currentCodeForSnapshot = codes[currentExercise?.id ?? ''] ?? '';
   const { saveNow } = useAutoSnapshot(currentExercise?.id, currentCodeForSnapshot);
+
+  const hasCodeActivity = useRef(false);
+  const { onFocus: onProblemFocus, onBlur: onProblemBlur } = useReadingTimeEmitter(currentExercise?.id);
+  const { onProblemView, setCodeLines } = useRereadEmitter(currentExercise?.id, hasCodeActivity.current);
 
   useEffect(() => {
     if (activityId) {
@@ -149,6 +154,7 @@ export default function StudentActivityViewPage() {
   // Save snapshot before execution
   function handleRun() {
     if (!currentExercise) return;
+    hasCodeActivity.current = true;
     saveNow();
     run(currentExercise.id, codes[currentExercise.id] ?? '', stdinInputs[currentExercise.id] ?? '');
   }
@@ -326,7 +332,14 @@ export default function StudentActivityViewPage() {
 
         {/* Enunciado */}
         <Card padding="md" className="mt-5">
-          <div className="text-[0.9375rem] leading-relaxed text-[var(--color-text-primary)] whitespace-pre-wrap">
+          <div
+            className="text-[0.9375rem] leading-relaxed text-[var(--color-text-primary)] whitespace-pre-wrap"
+            onFocus={onProblemFocus}
+            onBlur={onProblemBlur}
+            onMouseEnter={() => { onProblemFocus(); onProblemView(); }}
+            onMouseLeave={onProblemBlur}
+            tabIndex={0}
+          >
             {currentExercise.description}
           </div>
         </Card>
@@ -354,7 +367,12 @@ export default function StudentActivityViewPage() {
           </div>
           <textarea
             value={currentCode}
-            onChange={(e) => setCodes((prev) => ({ ...prev, [currentExercise.id]: e.target.value }))}
+            onChange={(e) => {
+              const val = e.target.value;
+              setCodes((prev) => ({ ...prev, [currentExercise.id]: val }));
+              hasCodeActivity.current = true;
+              setCodeLines(val.split('\n').length);
+            }}
             rows={14}
             spellCheck={false}
             className="w-full rounded-[8px] border border-[var(--color-border)] bg-[var(--color-neutral-950)] px-5 py-4 font-mono text-[0.8125rem] leading-relaxed text-[var(--color-neutral-200)] outline-none transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] placeholder:text-[var(--color-neutral-600)] focus:border-[var(--color-neutral-600)] focus:ring-2 focus:ring-[var(--color-neutral-600)]/10 resize-y"

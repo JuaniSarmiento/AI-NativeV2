@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import ValidationError
 from app.core.logging import get_logger
 from app.features.governance.models import GovernanceEvent
 from app.features.governance.repositories import GovernanceEventRepository
 from app.shared.models.event_outbox import EventOutbox
 
 logger = get_logger(__name__)
+
+_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 
 
 class GovernanceService:
@@ -137,6 +141,70 @@ class GovernanceService:
         )
         return event
 
+    @staticmethod
+    def validate_prompt_version(
+        new_version: str,
+        previous_version: str | None,
+        change_type: str,
+    ) -> None:
+        """Validate that version increment matches the declared change_type.
+
+        Raises ValidationError if the version does not match the change_type rules:
+        - major: major must increment, minor and patch reset to 0
+        - minor: major stays, minor increments, patch resets to 0
+        - patch: major.minor stays, patch increments
+        """
+        if change_type not in ("major", "minor", "patch"):
+            raise ValidationError(
+                message=f"Invalid change_type '{change_type}'. Must be major, minor, or patch.",
+                code="INVALID_CHANGE_TYPE",
+            )
+
+        new_match = _SEMVER_RE.match(new_version)
+        if not new_match:
+            raise ValidationError(
+                message=f"Version '{new_version}' is not valid semver (expected X.Y.Z).",
+                code="INVALID_VERSION_FORMAT",
+            )
+
+        new_major, new_minor, new_patch = (
+            int(new_match.group(1)),
+            int(new_match.group(2)),
+            int(new_match.group(3)),
+        )
+
+        if previous_version is None:
+            return
+
+        prev_match = _SEMVER_RE.match(previous_version)
+        if not prev_match:
+            return
+
+        prev_major, prev_minor, prev_patch = (
+            int(prev_match.group(1)),
+            int(prev_match.group(2)),
+            int(prev_match.group(3)),
+        )
+
+        if change_type == "major":
+            if new_major != prev_major + 1:
+                raise ValidationError(
+                    message=f"Major change requires major version increment: expected {prev_major + 1}.x.x, got {new_version}.",
+                    code="VERSION_MISMATCH",
+                )
+        elif change_type == "minor":
+            if new_major != prev_major or new_minor != prev_minor + 1:
+                raise ValidationError(
+                    message=f"Minor change requires minor version increment: expected {prev_major}.{prev_minor + 1}.x, got {new_version}.",
+                    code="VERSION_MISMATCH",
+                )
+        elif change_type == "patch":
+            if new_major != prev_major or new_minor != prev_minor or new_patch != prev_patch + 1:
+                raise ValidationError(
+                    message=f"Patch change requires patch version increment: expected {prev_major}.{prev_minor}.{prev_patch + 1}, got {new_version}.",
+                    code="VERSION_MISMATCH",
+                )
+
     async def record_prompt_created(
         self,
         *,
@@ -145,6 +213,8 @@ class GovernanceService:
         version: str,
         sha256_hash: str,
         created_by: uuid.UUID,
+        change_type: str | None = None,
+        change_justification: str | None = None,
     ) -> GovernanceEvent:
         """Record a governance event when a new system prompt is created.
 
@@ -154,18 +224,26 @@ class GovernanceService:
             version: Semantic version string (e.g. ``"1.0.0"``).
             sha256_hash: SHA-256 hash of the prompt content.
             created_by: UUID of the admin that created the prompt.
+            change_type: Optional semantic change type (major/minor/patch).
+            change_justification: Optional justification text.
         """
+        details: dict = {
+            "name": name,
+            "version": version,
+            "sha256_hash": sha256_hash,
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        }
+        if change_type:
+            details["change_type"] = change_type
+        if change_justification:
+            details["change_justification"] = change_justification
+
         return await self.record_event(
             event_type="prompt.created",
             actor_id=created_by,
             target_type="prompt",
             target_id=prompt_id,
-            details={
-                "name": name,
-                "version": version,
-                "sha256_hash": sha256_hash,
-                "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-            },
+            details=details,
         )
 
     async def record_prompt_activated(

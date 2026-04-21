@@ -96,6 +96,13 @@ class CognitiveSession(Base):
         default="open",
         server_default=text("'open'"),
     )
+    chain_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=2,
+        server_default=text("2"),
+        comment="Hash chain formula version: 1=original, 2=includes prompt_hash",
+    )
 
     # Relationships
     events: Mapped[list[CognitiveEvent]] = relationship(
@@ -131,6 +138,7 @@ class CognitiveEvent(Base):
             name="uq_cognitive_events_session_sequence",
         ),
         Index("ix_cognitive_events_session_id", "session_id"),
+        Index("ix_cognitive_events_n4_level", "n4_level"),
         {"schema": "cognitive"},
     )
 
@@ -168,6 +176,11 @@ class CognitiveEvent(Base):
         String(64),
         nullable=False,
         comment="SHA-256(previous_hash + ':' + event_type + ':' + json(payload) + ':' + created_at_iso)",
+    )
+    n4_level: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="N4 observation level 1-4, null for lifecycle events",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

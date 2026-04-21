@@ -12,6 +12,7 @@ import pytest
 
 from app.features.cognitive.ctr_builder import (
     compute_event_hash,
+    compute_event_hash_v1,
     compute_genesis_hash,
     verify_chain,
 )
@@ -33,8 +34,12 @@ def _make_event(
     previous_hash: str,
     created_at: datetime,
 ) -> MagicMock:
-    """Build a lightweight mock that looks like a CognitiveEvent ORM object."""
-    event_hash = compute_event_hash(previous_hash, event_type, payload, created_at)
+    """Build a lightweight mock that looks like a CognitiveEvent ORM object.
+
+    Uses the V1 formula so that existing verify_chain() calls with the default
+    chain_version=1 continue to pass.
+    """
+    event_hash = compute_event_hash_v1(previous_hash, event_type, payload, created_at)
     mock = MagicMock()
     mock.sequence_number = sequence_number
     mock.event_type = event_type
@@ -294,3 +299,147 @@ def test_session_hash_equals_last_event_hash() -> None:
     assert result["valid"] is True
     # And the sealed hash is the final link
     assert simulated_session_hash == events[-1].event_hash
+
+
+# ---------------------------------------------------------------------------
+# V1 / V2 hash formula distinction (Task 1.7)
+# ---------------------------------------------------------------------------
+
+
+def test_v1_hash_matches_original_formula() -> None:
+    """compute_event_hash_v1 must reproduce the exact pre-V2 formula."""
+    previous_hash = "a" * 64
+    event_type = "reads_problem"
+    payload = {"key": "value"}
+    ts = datetime(2026, 4, 21, 10, 0, 0, tzinfo=timezone.utc)
+
+    payload_str = json.dumps(payload, sort_keys=True, default=str)
+    expected_data = f"{previous_hash}:{event_type}:{payload_str}:{ts.isoformat()}"
+    expected_hash = hashlib.sha256(expected_data.encode("utf-8")).hexdigest()
+
+    assert compute_event_hash_v1(previous_hash, event_type, payload, ts) == expected_hash
+
+
+def test_v2_hash_includes_prompt_hash() -> None:
+    """compute_event_hash with a non-empty prompt_hash differs from V1."""
+    previous_hash = "a" * 64
+    event_type = "reads_problem"
+    payload = {"key": "value"}
+    ts = datetime(2026, 4, 21, 10, 0, 0, tzinfo=timezone.utc)
+    ph = "p" * 64
+
+    h_v1 = compute_event_hash_v1(previous_hash, event_type, payload, ts)
+    h_v2 = compute_event_hash(previous_hash, event_type, payload, ts, prompt_hash=ph)
+
+    assert h_v1 != h_v2
+
+
+def test_v2_with_empty_prompt_hash_differs_from_v1() -> None:
+    """V2 with empty prompt_hash still differs from V1 due to trailing colon."""
+    previous_hash = "a" * 64
+    event_type = "code.run"
+    payload = {}
+    ts = datetime(2026, 4, 21, 10, 0, 0, tzinfo=timezone.utc)
+
+    h_v1 = compute_event_hash_v1(previous_hash, event_type, payload, ts)
+    h_v2 = compute_event_hash(previous_hash, event_type, payload, ts, prompt_hash="")
+
+    assert h_v1 != h_v2
+
+
+def _make_event_v1(
+    sequence_number: int,
+    event_type: str,
+    payload: dict,  # type: ignore[type-arg]
+    previous_hash: str,
+    created_at: datetime,
+) -> MagicMock:
+    """Build a mock CognitiveEvent whose hash was computed with V1 formula."""
+    event_hash = compute_event_hash_v1(previous_hash, event_type, payload, created_at)
+    mock = MagicMock()
+    mock.sequence_number = sequence_number
+    mock.event_type = event_type
+    mock.payload = payload
+    mock.previous_hash = previous_hash
+    mock.event_hash = event_hash
+    mock.created_at = created_at
+    return mock
+
+
+def _make_event_v2(
+    sequence_number: int,
+    event_type: str,
+    payload: dict,  # type: ignore[type-arg]
+    previous_hash: str,
+    created_at: datetime,
+    prompt_hash: str = "",
+) -> MagicMock:
+    """Build a mock CognitiveEvent whose hash was computed with V2 formula."""
+    enriched = {**payload}
+    if prompt_hash:
+        enriched["prompt_hash"] = prompt_hash
+    event_hash = compute_event_hash(
+        previous_hash, event_type, enriched, created_at, prompt_hash=prompt_hash
+    )
+    mock = MagicMock()
+    mock.sequence_number = sequence_number
+    mock.event_type = event_type
+    mock.payload = enriched
+    mock.previous_hash = previous_hash
+    mock.event_hash = event_hash
+    mock.created_at = created_at
+    return mock
+
+
+def test_verify_chain_v1_uses_v1_formula() -> None:
+    """verify_chain with chain_version=1 validates a chain built with V1 hashes."""
+    genesis = compute_genesis_hash(str(uuid.uuid4()), _utcnow())
+    ts1 = datetime(2026, 4, 21, 10, 1, 0, tzinfo=timezone.utc)
+    ts2 = datetime(2026, 4, 21, 10, 2, 0, tzinfo=timezone.utc)
+
+    e1 = _make_event_v1(1, "reads_problem", {}, genesis, ts1)
+    e2 = _make_event_v1(2, "code.run", {"stdout": "ok"}, e1.event_hash, ts2)
+
+    result = verify_chain(genesis, [e1, e2], chain_version=1)
+    assert result["valid"] is True
+    assert result["events_checked"] == 2
+
+
+def test_verify_chain_v2_uses_v2_formula() -> None:
+    """verify_chain with chain_version=2 validates a chain built with V2 hashes."""
+    genesis = compute_genesis_hash(str(uuid.uuid4()), _utcnow())
+    ph = "c" * 64
+    ts1 = datetime(2026, 4, 21, 10, 1, 0, tzinfo=timezone.utc)
+    ts2 = datetime(2026, 4, 21, 10, 2, 0, tzinfo=timezone.utc)
+
+    e1 = _make_event_v2(1, "reads_problem", {}, genesis, ts1, prompt_hash=ph)
+    e2 = _make_event_v2(2, "code.run", {}, e1.event_hash, ts2, prompt_hash=ph)
+
+    result = verify_chain(genesis, [e1, e2], chain_version=2)
+    assert result["valid"] is True
+    assert result["events_checked"] == 2
+
+
+def test_verify_chain_v1_rejects_v2_hashes() -> None:
+    """A V1 verifier rejects a chain that was built with the V2 formula."""
+    genesis = compute_genesis_hash(str(uuid.uuid4()), _utcnow())
+    ph = "d" * 64
+    ts = datetime(2026, 4, 21, 10, 1, 0, tzinfo=timezone.utc)
+
+    e1 = _make_event_v2(1, "reads_problem", {}, genesis, ts, prompt_hash=ph)
+
+    result = verify_chain(genesis, [e1], chain_version=1)
+    assert result["valid"] is False
+    assert result["failed_at_sequence"] == 1
+
+
+def test_verify_chain_v2_rejects_v1_hashes() -> None:
+    """A V2 verifier rejects a chain that was built with the V1 formula."""
+    genesis = compute_genesis_hash(str(uuid.uuid4()), _utcnow())
+    ts = datetime(2026, 4, 21, 10, 1, 0, tzinfo=timezone.utc)
+
+    e1 = _make_event_v1(1, "reads_problem", {}, genesis, ts)
+
+    result = verify_chain(genesis, [e1], chain_version=2)
+    assert result["valid"] is False
+    assert result["failed_at_sequence"] == 1

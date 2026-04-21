@@ -13,7 +13,13 @@ from app.core.logging import get_logger
 from app.core.security import validate_ws_token
 from app.config import get_settings
 from app.features.auth.dependencies import CurrentUser, RedisClient, get_redis, require_role
-from app.features.tutor.llm_adapter import AnthropicAdapter, LLMAdapter, LLMError, MistralAdapter
+from app.features.tutor.llm_adapter import (
+    AnthropicAdapter,
+    FallbackLLMAdapter,
+    LLMAdapter,
+    LLMError,
+    MistralAdapter,
+)
 from app.features.tutor.rate_limiter import TutorRateLimiter
 from app.features.tutor.context_builder import ContextBuilder
 from app.features.tutor.schemas import (
@@ -39,10 +45,17 @@ _WS_TIMEOUT_SECONDS = 60.0
 
 
 def _create_llm_adapter() -> LLMAdapter:
-    provider = get_settings().tutor_llm_provider
+    settings = get_settings()
+    provider = settings.tutor_llm_provider
     if provider == "mistral":
-        return MistralAdapter()
-    return AnthropicAdapter()
+        primary: LLMAdapter = MistralAdapter()
+    else:
+        primary = AnthropicAdapter()
+
+    if settings.tutor_llm_fallback:
+        secondary: LLMAdapter = AnthropicAdapter() if provider == "mistral" else MistralAdapter()
+        return FallbackLLMAdapter(primary, secondary)
+    return primary
 
 
 # ---------------------------------------------------------------------------

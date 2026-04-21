@@ -10,6 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.logging import get_logger
 from app.features.cognitive.classifier import CognitiveEventClassifier, llm_classify_message
+from app.features.cognitive.detectors import (
+    ManualTestCaseDetector,
+    PseudocodeDetector,
+    TutorCodeAcceptanceDetector,
+)
 from app.features.cognitive.service import CognitiveService
 from app.features.tutor.n4_classifier import N4Classifier
 
@@ -50,6 +55,9 @@ class CognitiveEventConsumer:
         self._session_factory = session_factory
         self._classifier = CognitiveEventClassifier()
         self._n4_classifier = N4Classifier()
+        self._pseudocode_detector = PseudocodeDetector()
+        self._test_detector = ManualTestCaseDetector()
+        self._tutor_acceptance_detector = TutorCodeAcceptanceDetector()
         self._api_key = api_key
         self._model = model
         self._running = False
@@ -280,6 +288,11 @@ class CognitiveEventConsumer:
                     payload=classified.payload,
                 )
 
+                # --- Synthetic event detection (post-processing) ---
+                await self._emit_synthetic_events(
+                    service, cog_session, classified.event_type, classified.payload
+                )
+
                 # Auto-close triggers — only on submission (session.closed just records the event)
                 if classified.event_type == "submission.created":
                     try:
@@ -302,6 +315,69 @@ class CognitiveEventConsumer:
                 "exercise_id": str(exercise_id),
             },
         )
+
+    # ------------------------------------------------------------------
+    # Synthetic event detection
+    # ------------------------------------------------------------------
+
+    async def _emit_synthetic_events(
+        self,
+        service: CognitiveService,
+        cog_session: Any,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> None:
+        """Run detectors and emit any synthetic events into the CTR."""
+        from app.features.cognitive.classifier import CognitiveEventClassifier
+
+        synthetic_events = []
+
+        if event_type == "code.snapshot":
+            pseudo = self._pseudocode_detector.detect(payload)
+            if pseudo is not None:
+                synthetic_events.append(pseudo)
+
+            tutor_resp = self._tutor_acceptance_detector.detect(
+                payload,
+                recent_tutor_responses=payload.get("_recent_tutor_responses", []),
+                recent_events=payload.get("_recent_events", []),
+            )
+            if tutor_resp is not None:
+                synthetic_events.append(tutor_resp)
+
+        elif event_type == "code.run":
+            test_case = self._test_detector.detect(payload)
+            if test_case is not None:
+                synthetic_events.append(test_case)
+
+        classifier = CognitiveEventClassifier()
+        for synthetic in synthetic_events:
+            classified = classifier.classify(synthetic.event_type, synthetic.payload)
+            if classified is None:
+                continue
+            try:
+                await service.add_event(
+                    session=cog_session,
+                    event_type=classified.event_type,
+                    n4_level=classified.n4_level,
+                    payload=classified.payload,
+                )
+                logger.debug(
+                    "Synthetic CTR event emitted",
+                    extra={
+                        "event_type": classified.event_type,
+                        "n4_level": classified.n4_level,
+                        "session_id": str(cog_session.id),
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to emit synthetic event",
+                    extra={
+                        "event_type": synthetic.event_type,
+                        "session_id": str(cog_session.id),
+                    },
+                )
 
 
 # ---------------------------------------------------------------------------

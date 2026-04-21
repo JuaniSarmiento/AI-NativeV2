@@ -60,19 +60,19 @@ class TestCriticalRisk:
         assert result.evaluation_profile["risk_level"] == "critical"
 
     def test_critical_via_very_low_n4_score(self) -> None:
-        """N4 score <= 30 → critical (n4_score_max threshold)."""
+        """N4 score <= 30 → critical (n4_score_max threshold).
+
+        All generative prompts (reflective_ratio=0 → base_score=0) + dependent
+        sub-classification → dependency penalty drives score well below 30.
+        """
         engine = _engine()
         session = _make_session()
-        # Events: many non-tutor + one tutor with n4_level=1 (lowest quality)
-        # N4 score: (1/3)*100 * (1 - 0.3*1.0) penalty applied... let's ensure it's ≤30
-        # dependency_score = 1.0 (1 dependent / 1 tutor event)
-        # n4 raw = (1/3)*100 = 33.33, penalized: 33.33 * (1 - 0.3*1.0) = 23.33 < 30
         events = [
             _make_event("reads_problem", sequence_number=1),
             _make_event("reads_problem", sequence_number=2),
             _make_event(
                 "tutor.question_asked",
-                {"n4_level": 1, "sub_classification": "dependent"},
+                {"prompt_type": "generative", "sub_classification": "dependent"},
                 sequence_number=3,
             ),
         ]
@@ -118,18 +118,19 @@ class TestHighRisk:
         assert result.metrics.risk_level in ("critical", "high")
 
     def test_high_via_very_low_any_n_score(self) -> None:
-        """any N score <= 20 (but dependency < 0.5 and N4 > 30) → high."""
+        """any N score <= 20 (but dependency < 0.5 and N4 > 30) → high.
+
+        No reads_problem at all → N1 comprehension = 0.
+        """
         engine = _engine()
         session = _make_session()
-        # Create scenario: mostly tutor interactions with no N1/N2/N3 events
-        # 1 reads_problem + 99 tutor (autonomous) → N1 very low
-        events = [_make_event("reads_problem", sequence_number=1)]
-        for i in range(99):
+        events = []
+        for i in range(10):
             events.append(
                 _make_event(
                     "tutor.question_asked",
-                    {"n4_level": 3, "sub_classification": "autonomous"},
-                    sequence_number=i + 2,
+                    {"prompt_type": "exploratory", "sub_classification": "autonomous"},
+                    sequence_number=i + 1,
                 )
             )
         result = engine.compute(session, events)

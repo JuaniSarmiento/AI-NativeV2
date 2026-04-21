@@ -246,3 +246,61 @@ class MistralAdapter(LLMAdapter):
                 raise LLMUnavailableError() from exc
             logger.error("Mistral API error", extra={"error": str(exc)})
             raise LLMError(message=f"LLM error: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# Fallback adapter — wraps primary + secondary with automatic failover
+# ---------------------------------------------------------------------------
+
+
+class FallbackLLMAdapter(LLMAdapter):
+    """Wraps primary + secondary adapters with automatic failover.
+
+    On ``LLMUnavailableError`` from the primary adapter, transparently
+    switches to the secondary and continues yielding tokens.
+
+    TODO: The caller (router/service) should detect that ``model_name``
+    changed between the start and end of a stream and log a governance event
+    for the provider switch.  The adapter itself has no DB access and cannot
+    write governance events directly.
+    """
+
+    def __init__(self, primary: LLMAdapter, secondary: LLMAdapter) -> None:
+        self._primary = primary
+        self._secondary = secondary
+        self._active_adapter: LLMAdapter = primary
+
+    @property
+    def last_usage(self) -> LLMUsage | None:
+        return self._active_adapter.last_usage
+
+    @property
+    def model_name(self) -> str:
+        return self._active_adapter.model_name
+
+    async def stream_response(
+        self,
+        messages: list[ChatMessage],
+        system_prompt: str,
+        *,
+        max_tokens: int | None = None,
+    ) -> AsyncIterator[str]:
+        try:
+            self._active_adapter = self._primary
+            async for token in self._primary.stream_response(
+                messages, system_prompt, max_tokens=max_tokens
+            ):
+                yield token
+        except LLMUnavailableError:
+            logger.warning(
+                "LLM primary provider unavailable — falling back to secondary",
+                extra={
+                    "primary": self._primary.model_name,
+                    "secondary": self._secondary.model_name,
+                },
+            )
+            self._active_adapter = self._secondary
+            async for token in self._secondary.stream_response(
+                messages, system_prompt, max_tokens=max_tokens
+            ):
+                yield token

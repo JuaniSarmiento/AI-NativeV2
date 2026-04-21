@@ -59,6 +59,30 @@ class CoherenceResult:
     prompt_type_distribution: dict  # type: ignore[type-arg]  # {"exploratory": N, "verifier": N, "generative": N}
 
 
+@dataclass
+class SessionPattern:
+    """Extracted behavioural pattern from a single closed session (B5).
+
+    Used by compute_cross_session() to compare current vs historical sessions.
+    All ratio fields are in [0.0, 1.0] (not 0-100 percentages).
+    """
+
+    n1_ratio: float
+    """Fraction of events that are N1-level (reading/comprehension)."""
+
+    n3_ratio: float
+    """Fraction of events that are N3-level (validation/testing)."""
+
+    exploratory_prompt_ratio: float
+    """Fraction of tutor.question_asked with prompt_type == "exploratory"."""
+
+    has_post_tutor_verification: bool
+    """True when at least one code.run follows a tutor.response_received."""
+
+    qe_score: float | None
+    """Qe composite score from CognitiveMetrics (0-100), or None if not computed."""
+
+
 # ---------------------------------------------------------------------------
 # CoherenceEngine
 # ---------------------------------------------------------------------------
@@ -88,6 +112,7 @@ class CoherenceEngine:
         events: list[Any],
         chat_messages: list[Any],
         code_snapshots: list[dict[str, Any]],
+        llm_discourse_score: Decimal | None = None,
     ) -> CoherenceResult:
         """Compute all coherence scores.
 
@@ -97,6 +122,9 @@ class CoherenceEngine:
             code_snapshots: Dicts produced by CognitiveService.get_code_evolution()
                             — each dict has at least "code", "snapshot_at",
                             "diff_unified" (str | None).
+            llm_discourse_score: When provided (not None), this LLM-generated score
+                                 is used directly as code_discourse_score instead of
+                                 computing the Jaccard-based estimate. (B4)
 
         Returns:
             CoherenceResult with the five fields ready for persistence.
@@ -105,9 +133,12 @@ class CoherenceEngine:
         temporal_coherence_score, temporal_anomalies = self._compute_temporal_coherence(
             events, prompt_type_distribution
         )
-        code_discourse_score = self._compute_code_discourse_coherence(
-            chat_messages, code_snapshots
-        )
+        if llm_discourse_score is not None:
+            code_discourse_score: Decimal | None = _clamp(_d2(llm_discourse_score))
+        else:
+            code_discourse_score = self._compute_code_discourse_coherence(
+                chat_messages, code_snapshots
+            )
         inter_iteration_score, iteration_anomalies = self._compute_inter_iteration_consistency(
             code_snapshots
         )
@@ -140,6 +171,74 @@ class CoherenceEngine:
             coherence_anomalies=coherence_anomalies,
             prompt_type_distribution=prompt_type_distribution,
         )
+
+    # ------------------------------------------------------------------
+    # B5 — Cross-session inter-iteration coherence
+    # ------------------------------------------------------------------
+
+    def compute_cross_session(
+        self,
+        current: SessionPattern,
+        historical: list[SessionPattern],
+    ) -> Decimal | None:
+        """Score the student's learning trajectory across multiple sessions.
+
+        Compares the current session's behavioural pattern against the mean
+        of historical sessions on four dimensions. The score reflects whether
+        the student is maintaining or improving their cognitive engagement.
+
+        Scoring (base 50, adjusted up/down by dimension comparisons):
+          - n1_ratio maintained or improved → +25
+          - n3_ratio maintained or improved → +25
+          - exploratory_prompt_ratio maintained or improved → +25
+          - has_post_tutor_verification when historical had it → +25
+
+        When all four dimensions improve: 100.
+        When all four regress: 0 (base 50 - 4*12.5, but floors at 0).
+
+        Returns None if historical list is empty.
+
+        Args:
+            current:    Pattern extracted from the session being closed.
+            historical: Patterns from up to 5 prior closed sessions.
+        """
+        if not historical:
+            return None
+
+        # Compute per-dimension means from historical sessions
+        mean_n1 = sum(p.n1_ratio for p in historical) / len(historical)
+        mean_n3 = sum(p.n3_ratio for p in historical) / len(historical)
+        mean_exploratory = sum(p.exploratory_prompt_ratio for p in historical) / len(historical)
+        hist_has_verification = any(p.has_post_tutor_verification for p in historical)
+
+        score = 50.0
+        _EPS = 1e-9  # float arithmetic tolerance
+
+        # Each dimension contributes ±12.5 relative to the base
+        if current.n1_ratio >= mean_n1 - _EPS:
+            score += 12.5
+        else:
+            score -= 12.5
+
+        if current.n3_ratio >= mean_n3 - _EPS:
+            score += 12.5
+        else:
+            score -= 12.5
+
+        if current.exploratory_prompt_ratio >= mean_exploratory - _EPS:
+            score += 12.5
+        else:
+            score -= 12.5
+
+        if hist_has_verification and current.has_post_tutor_verification:
+            score += 12.5
+        elif hist_has_verification and not current.has_post_tutor_verification:
+            score -= 12.5
+        else:
+            # Historical had no verification habit — no bonus/penalty
+            pass
+
+        return _clamp(_d2(score))
 
     # ------------------------------------------------------------------
     # Task 3.8 — Prompt type distribution

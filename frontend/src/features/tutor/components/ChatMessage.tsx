@@ -1,7 +1,9 @@
+import { useCallback } from 'react';
 import type { TutorMessage } from '../types';
 
 interface ChatMessageProps {
   message: TutorMessage;
+  onCopyFromTutor?: (fragment: string, messageId: string | null) => void;
 }
 
 /**
@@ -14,9 +16,17 @@ interface ChatMessageProps {
  * - No heavy borders, no gradients — just background differentiation
  * - Spring easing on entry
  */
-export default function ChatMessage({ message }: ChatMessageProps) {
+export default function ChatMessage({ message, onCopyFromTutor }: ChatMessageProps) {
   const isUser = message.role === 'user';
   const isGuardrail = message.isGuardrail === true;
+
+  const handleCopy = useCallback(() => {
+    if (isUser || !onCopyFromTutor) return;
+    const selection = window.getSelection()?.toString() ?? '';
+    if (selection.length >= 5) {
+      onCopyFromTutor(selection, message.id ?? null);
+    }
+  }, [isUser, onCopyFromTutor, message.id]);
 
   if (isGuardrail) {
     return (
@@ -61,6 +71,7 @@ export default function ChatMessage({ message }: ChatMessageProps) {
             ? 'bg-[var(--color-neutral-900)] text-white dark:bg-[var(--color-neutral-200)] dark:text-[var(--color-neutral-900)]'
             : 'bg-[var(--color-neutral-100)] text-[var(--color-text-primary)] dark:bg-[var(--color-neutral-800)]',
         ].join(' ')}
+        onCopy={handleCopy}
       >
         <p className="whitespace-pre-wrap break-words">
           {message.content}

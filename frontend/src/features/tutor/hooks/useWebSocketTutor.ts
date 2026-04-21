@@ -32,7 +32,8 @@ export function useWebSocketTutor(exerciseId: string) {
       useTutorStore.getState().setConnectionStatus('connecting');
       useTutorStore.getState().setExerciseId(exerciseId);
 
-      const url = `${config.wsUrl}/ws/tutor/chat?token=${token}`;
+      const base = config.wsUrl.replace(/\/ws\/?$/, '');
+      const url = `${base}/ws/tutor/chat?token=${token}`;
       const ws = new WebSocket(url);
       wsRef.current = ws;
 

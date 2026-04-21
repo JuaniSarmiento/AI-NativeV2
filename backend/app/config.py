@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     # --- Tutor ---
     tutor_llm_provider: str = Field(default="mistral", alias="TUTOR_LLM_PROVIDER")
     tutor_rate_limit_per_hour: int = Field(default=30, alias="TUTOR_RATE_LIMIT_PER_HOUR")
+    tutor_llm_fallback: bool = Field(default=False, alias="TUTOR_LLM_FALLBACK")
+
+    # --- Research / Pseudonymization ---
+    pseudonymization_salt: str = Field(
+        default="ai-native-default-salt", alias="PSEUDONYMIZATION_SALT"
+    )
 
     # --- CORS ---
     cors_origins: list[str] = Field(
@@ -67,8 +73,9 @@ class Settings(BaseSettings):
     )
 
     # --- Logging ---
-    log_level: str = Field(default="DEBUG", alias="LOG_LEVEL")
+    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     log_format: str = Field(default="json", alias="LOG_FORMAT")
+    sql_echo: bool = Field(default=False, alias="SQL_ECHO")
 
     # --- Server ---
     backend_host: str = Field(default="0.0.0.0", alias="BACKEND_HOST")

@@ -298,8 +298,11 @@ def _register_routers(app: FastAPI) -> None:
     from app.features.tutor.router import router as tutor_router
     from app.features.governance.router import router as governance_router
     from app.features.cognitive.router import router as cognitive_router
+    from app.features.cognitive.student_router import router as cognitive_student_router
+    from app.features.cognitive.export_router import router as cognitive_export_router
     from app.features.evaluation.router import router as evaluation_router
     from app.features.risk.router import router as risk_router
+    from app.features.reports.router import router as reports_router
 
     app.include_router(auth_router)
     app.include_router(courses_router)
@@ -310,5 +313,8 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(tutor_router)
     app.include_router(governance_router)
     app.include_router(cognitive_router)
+    app.include_router(cognitive_student_router)
+    app.include_router(cognitive_export_router)
     app.include_router(evaluation_router)
     app.include_router(risk_router)
+    app.include_router(reports_router)

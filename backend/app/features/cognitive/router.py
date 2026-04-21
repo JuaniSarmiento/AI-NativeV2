@@ -114,6 +114,7 @@ async def list_sessions(
     commission_id: uuid.UUID = Query(..., description="Commission UUID (required)"),
     student_id: uuid.UUID | None = Query(None),
     exercise_id: uuid.UUID | None = Query(None),
+    activity_id: uuid.UUID | None = Query(None, description="Filter by activity (resolves its exercises)"),
     status: str | None = Query(None, description="open, closed, or invalidated"),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
@@ -124,10 +125,18 @@ async def list_sessions(
     from sqlalchemy import select
     from app.shared.models.exercise import Exercise
 
+    resolved_exercise_ids: list[uuid.UUID] | None = None
+    if activity_id is not None:
+        ex_result = await db.execute(
+            select(Exercise.id).where(Exercise.activity_id == activity_id)
+        )
+        resolved_exercise_ids = [row[0] for row in ex_result.all()]
+
     items, total = await service._session_repo.get_sessions_by_commission(
         commission_id=commission_id,
         student_id=student_id,
         exercise_id=exercise_id,
+        exercise_ids=resolved_exercise_ids,
         status=status,
         page=page,
         per_page=per_page,
@@ -186,8 +195,11 @@ async def get_session_trace(
         for entry in trace["code_evolution"]
     ]
     metrics_dict = None
+    anomalies = None
     if trace["metrics"] is not None:
-        metrics_dict = CognitiveMetricsResponse.from_orm(trace["metrics"]).model_dump()
+        metrics_obj = trace["metrics"]
+        metrics_dict = CognitiveMetricsResponse.from_orm(metrics_obj).model_dump()
+        anomalies = getattr(metrics_obj, "coherence_anomalies", None)
 
     verify_result = None
     if trace["verification"] is not None:
@@ -204,6 +216,7 @@ async def get_session_trace(
             chat=chat,
             metrics=metrics_dict,
             verification=verify_result,
+            anomalies=anomalies,
         ),
     )
 

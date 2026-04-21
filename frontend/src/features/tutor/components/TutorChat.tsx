@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 're
 import { useShallow } from 'zustand/react/shallow';
 import Card from '@/shared/components/Card';
 import Button from '@/shared/components/Button';
+import { useTutorClipboardEmitter } from '@/shared/hooks/useCognitiveEvents';
 import { useTutorStore } from '../store';
 import { useWebSocketTutor } from '../hooks/useWebSocketTutor';
 import ChatMessage from './ChatMessage';
@@ -46,6 +47,7 @@ export default function TutorChat({ exerciseId }: TutorChatProps) {
   const remainingMessages = useTutorStore((s) => s.remainingMessages);
 
   const { sendMessage } = useWebSocketTutor(exerciseId);
+  const { onCopyFromTutor } = useTutorClipboardEmitter(exerciseId);
 
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -113,7 +115,7 @@ export default function TutorChat({ exerciseId }: TutorChatProps) {
           </div>
         )}
         {messages.map((msg) => (
-          <ChatMessage key={msg.id} message={msg} />
+          <ChatMessage key={msg.id} message={msg} onCopyFromTutor={onCopyFromTutor} />
         ))}
         <div ref={messagesEndRef} />
       </div>

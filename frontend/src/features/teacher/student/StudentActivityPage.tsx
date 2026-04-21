@@ -1,434 +1,258 @@
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { apiClient } from '@/shared/lib/api-client';
-import RiskBadge from '@/features/teacher/dashboard/RiskBadge';
-import type { RiskLevel } from '@/features/teacher/dashboard/types';
 
-interface SessionSummary {
+interface ReportData {
   id: string;
-  exercise_id: string;
-  exercise_title: string | null;
-  status: string;
-  started_at: string;
-  closed_at: string | null;
+  student_id: string;
+  activity_id: string;
+  narrative_md: string;
+  structured_analysis: {
+    student_name?: string;
+    activity_title?: string;
+    sessions_analyzed?: number;
+    overall_scores?: Record<string, number | null>;
+    risk_level?: string | null;
+    patterns?: Array<{ type: string; severity: string; evidence: string }>;
+    strengths?: Array<{ dimension: string; description: string; evidence: string }>;
+    weaknesses?: Array<{ dimension: string; description: string; evidence: string }>;
+    evolution?: { trend: string; detail: string };
+    anomalies?: Array<{ type: string; detail?: string }>;
+  };
+  llm_provider: string;
+  model_used: string;
+  generated_at: string;
 }
 
-interface TraceData {
-  session: { id: string; status: string; started_at: string; closed_at: string | null };
-  student_name: string | null;
-  student_email: string | null;
-  exercise_title: string | null;
-  timeline: Array<{
-    id: string;
-    event_type: string;
-    sequence_number: number;
-    n4_level: number | null;
-    payload: Record<string, unknown>;
-    created_at: string;
-  }>;
-  code_evolution: Array<{
-    snapshot_id: string | null;
-    code: string;
-    snapshot_at: string;
-  }>;
-  chat: Array<{
-    id: string;
-    role: string;
-    content: string;
-    created_at: string;
-    n4_level: number | null;
-  }>;
-  metrics: {
-    n1_comprehension_score: number | null;
-    n2_strategy_score: number | null;
-    n3_validation_score: number | null;
-    n4_ai_interaction_score: number | null;
-    qe_score: number | null;
-    risk_level: string | null;
-    [key: string]: unknown;
-  } | null;
-  verification: { valid: boolean; events_checked: number | null } | null;
+function renderMarkdown(md: string): string {
+  let html = md
+    .replace(/^## (.+)$/gm, '<h2 class="text-lg font-semibold mt-6 mb-3 text-[var(--color-text-primary)]">$1</h2>')
+    .replace(/^### (.+)$/gm, '<h3 class="text-base font-medium mt-4 mb-2 text-[var(--color-text-primary)]">$1</h3>')
+    .replace(/^\* (.+)$/gm, '<li class="ml-4 mb-1 list-disc text-[var(--color-text-secondary)]">$1</li>')
+    .replace(/^\- (.+)$/gm, '<li class="ml-4 mb-1 list-disc text-[var(--color-text-secondary)]">$1</li>')
+    .replace(/^\d+\.\s+(.+)$/gm, '<li class="ml-4 mb-1 list-decimal text-[var(--color-text-secondary)]">$1</li>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong class="text-[var(--color-text-primary)]">$1</strong>')
+    .replace(/\n\n/g, '</p><p class="mb-3 text-sm leading-relaxed text-[var(--color-text-secondary)]">')
+    .replace(/\n/g, '<br/>');
+  return `<div class="text-sm leading-relaxed text-[var(--color-text-secondary)]">${html}</div>`;
 }
-
-function scoreColor(val: number | null): string {
-  if (val === null) return 'text-[var(--color-text-tertiary)]';
-  if (val >= 70) return 'text-[var(--color-success-600)] dark:text-[var(--color-success-400)]';
-  if (val >= 40) return 'text-[var(--color-warning-600)] dark:text-[var(--color-warning-400)]';
-  return 'text-[var(--color-error-600)] dark:text-[var(--color-error-400)]';
-}
-
-function barColor(val: number | null): string {
-  if (val === null) return 'bg-[var(--color-neutral-300)]';
-  if (val >= 70) return 'bg-[var(--color-success-500)]';
-  if (val >= 40) return 'bg-[var(--color-warning-500)]';
-  return 'bg-[var(--color-error-500)]';
-}
-
-const EVENT_TYPE_LABELS: Record<string, string> = {
-  reads_problem: 'Lectura del problema',
-  'code.snapshot': 'Snapshot de codigo',
-  'code.run': 'Ejecucion de codigo',
-  'submission.created': 'Entrega creada',
-  'tutor.question_asked': 'Pregunta al tutor',
-  'tutor.response_received': 'Respuesta del tutor',
-  'session.started': 'Sesion iniciada',
-  'session.closed': 'Sesion cerrada',
-  'reflection.submitted': 'Reflexion enviada',
-};
-
-const N4_COLORS: Record<number, string> = {
-  1: 'bg-blue-500',
-  2: 'bg-emerald-500',
-  3: 'bg-amber-500',
-  4: 'bg-purple-500',
-};
-
-const N4_LABELS: Record<number, string> = {
-  1: 'Comprension',
-  2: 'Estrategia',
-  3: 'Validacion',
-  4: 'Interaccion IA',
-};
 
 export default function StudentActivityPage() {
   const { studentId } = useParams<{ studentId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const commissionId = searchParams.get('commission') ?? '';
+  const activityId = searchParams.get('activity_id') ?? '';
 
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [report, setReport] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [studentName, setStudentName] = useState<string | null>(null);
-  const [studentEmail, setStudentEmail] = useState<string | null>(null);
-
-  const [expandedSession, setExpandedSession] = useState<string | null>(null);
-  const [traceData, setTraceData] = useState<Record<string, TraceData>>({});
-  const [loadingTrace, setLoadingTrace] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!studentId || !commissionId) return;
+    if (!studentId || !commissionId) {
+      setError('Faltan parámetros de navegación');
+      setLoading(false);
+      return;
+    }
+    if (!activityId) {
+      setError('Seleccioná una actividad en el dashboard para ver el informe del alumno.');
+      setLoading(false);
+      return;
+    }
+
+    generateOrFetchReport();
+  }, [studentId, commissionId, activityId]);
+
+  async function generateOrFetchReport() {
     setLoading(true);
-    apiClient
-      .get<{ data: SessionSummary[]; meta: unknown }>(
-        `/v1/cognitive/sessions?commission_id=${commissionId}&student_id=${studentId}&per_page=50`,
-      )
-      .then((res) => {
-        const payload = res.data as unknown as { data?: SessionSummary[] };
-        const items = Array.isArray(payload.data) ? payload.data : Array.isArray(res.data) ? res.data as unknown as SessionSummary[] : [];
-        setSessions(items);
-        if (items.length > 0) {
-          loadTrace(items[0].id);
-          setExpandedSession(items[0].id);
-        }
-      })
-      .catch(() => setSessions([]))
-      .finally(() => setLoading(false));
-  }, [studentId, commissionId]);
+    setError(null);
 
-  const loadTrace = async (sessionId: string) => {
-    if (traceData[sessionId]) return;
-    setLoadingTrace(sessionId);
     try {
-      const res = await apiClient.get<{ data: TraceData }>(`/v1/cognitive/sessions/${sessionId}/trace`);
-      const payload = res.data as unknown as { data?: TraceData };
-      const trace = payload.data ?? res.data as unknown as TraceData;
-      setTraceData((prev) => ({ ...prev, [sessionId]: trace }));
-      if (!studentName && trace.student_name) {
-        setStudentName(trace.student_name);
-        setStudentEmail(trace.student_email);
-      }
-    } catch {
-      // silent
-    } finally {
-      setLoadingTrace(null);
-    }
-  };
+      const res = await apiClient.get<ReportData | null>(
+        `/v1/reports?student_id=${studentId}&activity_id=${activityId}`,
+      );
 
-  const toggleSession = (sessionId: string) => {
-    if (expandedSession === sessionId) {
-      setExpandedSession(null);
-    } else {
-      setExpandedSession(sessionId);
-      loadTrace(sessionId);
+      if (res.data) {
+        setReport(res.data);
+        setLoading(false);
+        return;
+      }
+
+      const genRes = await apiClient.post<ReportData>('/v1/reports/generate', {
+        student_id: studentId,
+        activity_id: activityId,
+        commission_id: commissionId,
+      });
+      setReport(genRes.data);
+    } catch (err: unknown) {
+      const detail = err instanceof Error ? err.message : 'Error al generar el informe';
+      setError(detail);
+    } finally {
+      setLoading(false);
     }
-  };
+  }
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-6xl px-4 py-6">
-        <div className="flex items-center gap-3">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-accent-500)] border-t-transparent" />
-          <span className="text-sm text-[var(--color-text-secondary)]">Cargando actividad del alumno...</span>
+      <div className="mx-auto max-w-4xl px-4 py-12">
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-[var(--color-accent-500)] border-t-transparent" />
+          <p className="text-sm font-medium text-[var(--color-text-secondary)]">
+            Generando informe cognitivo...
+          </p>
+          <p className="text-xs text-[var(--color-text-tertiary)]">
+            Analizando sesiones y generando narrativa con IA
+          </p>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="mx-auto max-w-6xl space-y-6 px-4 py-6">
-      {/* Header */}
-      <div>
+  if (error) {
+    return (
+      <div className="mx-auto max-w-4xl px-4 py-10">
         <button
           onClick={() => navigate(-1)}
-          className="text-xs font-medium text-[var(--color-accent-600)] transition-colors hover:text-[var(--color-accent-700)]"
+          className="mb-4 text-xs font-medium text-[var(--color-accent-600)] hover:underline"
         >
           ← Volver al dashboard
         </button>
-        <h1 className="mt-3 text-2xl font-bold tracking-tight text-[var(--color-text-primary)]">
-          {studentName ?? `Alumno ${studentId?.slice(0, 8)}`}
-        </h1>
-        {studentEmail && (
-          <p className="mt-1 text-sm text-[var(--color-text-secondary)]">{studentEmail}</p>
-        )}
-        <p className="mt-1 text-sm text-[var(--color-text-tertiary)]">
-          {sessions.length} sesiones cognitivas registradas
-        </p>
-      </div>
-
-      {/* Sessions */}
-      {sessions.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-[var(--color-border)] p-12 text-center">
-          <p className="text-sm text-[var(--color-text-tertiary)]">
-            Este alumno no tiene sesiones cognitivas en esta comision.
+        <div className="rounded-xl border border-[var(--color-error-200)] bg-[var(--color-error-50)] p-6 dark:border-[var(--color-error-800)] dark:bg-[var(--color-error-900)]/20">
+          <h2 className="text-lg font-semibold text-[var(--color-error-700)] dark:text-[var(--color-error-400)]">
+            No se pudo generar el informe
+          </h2>
+          <p className="mt-2 text-sm text-[var(--color-error-600)] dark:text-[var(--color-error-300)]">
+            {error}
           </p>
         </div>
-      ) : (
-        <div className="space-y-4">
-          {sessions.map((session, idx) => {
-            const trace = traceData[session.id];
-            const isExpanded = expandedSession === session.id;
-            const isLoading = loadingTrace === session.id;
+      </div>
+    );
+  }
 
+  if (!report) return null;
+
+  const { structured_analysis: analysis } = report;
+
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-6">
+      {/* Header */}
+      <div className="mb-6">
+        <button
+          onClick={() => navigate(-1)}
+          className="mb-3 text-xs font-medium text-[var(--color-accent-600)] hover:underline"
+        >
+          ← Volver al dashboard
+        </button>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-[var(--color-text-primary)]">
+              Informe Cognitivo
+            </h1>
+            <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+              {analysis.student_name}
+            </p>
+            <p className="text-xs text-[var(--color-text-tertiary)]">
+              {analysis.activity_title}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-[var(--color-text-tertiary)]">
+              {analysis.sessions_analyzed} sesiones analizadas
+            </p>
+            <p className="text-xs text-[var(--color-text-tertiary)]">
+              {new Date(report.generated_at).toLocaleDateString('es-AR', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Score cards */}
+      {analysis.overall_scores && (
+        <div className="mb-6 grid grid-cols-5 gap-3">
+          {(['n1', 'n2', 'n3', 'n4', 'qe'] as const).map((key) => {
+            const val = analysis.overall_scores?.[`${key}_avg`] ?? null;
             return (
               <div
-                key={session.id}
-                className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]"
+                key={key}
+                className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-center"
               >
-                {/* Session header — clickable */}
-                <button
-                  onClick={() => toggleSession(session.id)}
-                  className="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-[var(--color-neutral-50)] dark:hover:bg-[var(--color-neutral-800)]/20"
+                <p className="text-[0.625rem] font-semibold uppercase tracking-wider text-[var(--color-text-tertiary)]">
+                  {key.toUpperCase()}
+                </p>
+                <p
+                  className={`mt-1 text-2xl font-bold tabular-nums ${
+                    val === null
+                      ? 'text-[var(--color-text-tertiary)]'
+                      : val >= 70
+                        ? 'text-[var(--color-success-600)]'
+                        : val >= 40
+                          ? 'text-[var(--color-warning-600)]'
+                          : 'text-[var(--color-error-600)]'
+                  }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-accent-100)] text-sm font-bold text-[var(--color-accent-700)] dark:bg-[var(--color-accent-900)]/30 dark:text-[var(--color-accent-400)]">
-                      {sessions.length - idx}
-                    </span>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-[var(--color-text-primary)]">
-                          {session.exercise_title ?? trace?.exercise_title ?? `Actividad ${session.exercise_id.slice(0, 8)}`}
-                        </span>
-                        <span className={`rounded-full px-2 py-0.5 text-[0.5625rem] font-semibold ${
-                          session.status === 'closed'
-                            ? 'bg-[var(--color-success-50)] text-[var(--color-success-700)] dark:bg-[var(--color-success-900)]/20 dark:text-[var(--color-success-400)]'
-                            : 'bg-[var(--color-info-50)] text-[var(--color-info-700)] dark:bg-[var(--color-info-900)]/20 dark:text-[var(--color-info-400)]'
-                        }`}>
-                          {session.status === 'closed' ? 'Cerrada' : 'En curso'}
-                        </span>
-                      </div>
-                      <span className="text-xs text-[var(--color-text-tertiary)]">
-                        {new Date(session.started_at).toLocaleString('es-AR')}
-                        {session.closed_at && (
-                          <> — {new Date(session.closed_at).toLocaleString('es-AR')}</>
-                        )}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {trace?.metrics && (
-                      <div className="flex items-center gap-2">
-                        <span className={`text-lg font-bold tabular-nums ${scoreColor(trace.metrics.qe_score)}`}>
-                          Qe {trace.metrics.qe_score != null ? trace.metrics.qe_score.toFixed(0) : '-'}
-                        </span>
-                        {trace.metrics.risk_level && (
-                          <RiskBadge level={trace.metrics.risk_level as RiskLevel} />
-                        )}
-                      </div>
-                    )}
-                    <span className="text-lg text-[var(--color-text-tertiary)]">
-                      {isExpanded ? '▾' : '▸'}
-                    </span>
-                  </div>
-                </button>
-
-                {/* Expanded trace */}
-                {isExpanded && (
-                  <div className="border-t border-[var(--color-border)] px-5 py-4">
-                    {isLoading && !trace ? (
-                      <div className="flex items-center gap-3 py-4">
-                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--color-accent-500)] border-t-transparent" />
-                        <span className="text-xs text-[var(--color-text-secondary)]">Cargando traza...</span>
-                      </div>
-                    ) : trace ? (
-                      <SessionDetail trace={trace} />
-                    ) : (
-                      <p className="py-4 text-xs text-[var(--color-text-tertiary)]">Error cargando la traza.</p>
-                    )}
-                  </div>
-                )}
+                  {val !== null ? val.toFixed(0) : '—'}
+                </p>
               </div>
             );
           })}
         </div>
       )}
-    </div>
-  );
-}
 
-function SessionDetail({ trace }: { trace: TraceData }) {
-  const metrics = trace.metrics;
-  const timeline = trace.timeline ?? [];
-  const chat = trace.chat ?? [];
-  const code = trace.code_evolution ?? [];
+      {/* Risk + evolution summary */}
+      <div className="mb-6 flex items-center gap-4">
+        {analysis.risk_level && (
+          <span
+            className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${
+              analysis.risk_level === 'critical'
+                ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                : analysis.risk_level === 'high'
+                  ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300'
+                  : analysis.risk_level === 'medium'
+                    ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300'
+                    : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+            }`}
+          >
+            Riesgo: {analysis.risk_level}
+          </span>
+        )}
+        {analysis.evolution && (
+          <span className="text-xs text-[var(--color-text-secondary)]">
+            Tendencia:{' '}
+            <strong>
+              {analysis.evolution.trend === 'improving'
+                ? '↑ Mejorando'
+                : analysis.evolution.trend === 'declining'
+                  ? '↓ Declinando'
+                  : analysis.evolution.trend === 'stable'
+                    ? '→ Estable'
+                    : '↕ Mixta'}
+            </strong>
+          </span>
+        )}
+      </div>
 
-  const dimensions = [
-    { label: 'Comprension', value: metrics?.n1_comprehension_score ?? null, desc: 'Entiende el problema?' },
-    { label: 'Estrategia', value: metrics?.n2_strategy_score ?? null, desc: 'Planifica la solucion?' },
-    { label: 'Validacion', value: metrics?.n3_validation_score ?? null, desc: 'Verifica y corrige?' },
-    { label: 'Uso de IA', value: metrics?.n4_ai_interaction_score ?? null, desc: 'Usa IA criticamente?' },
-  ];
+      {/* AI Narrative */}
+      <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
+        <div dangerouslySetInnerHTML={{ __html: renderMarkdown(report.narrative_md) }} />
+      </div>
 
-  return (
-    <div className="space-y-4">
-      {/* Metrics */}
-      {metrics && (
-        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-          {dimensions.map((dim) => (
-            <div key={dim.label} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] p-2.5">
-              <div className="flex items-baseline justify-between">
-                <span className="text-[0.625rem] font-medium text-[var(--color-text-tertiary)]">{dim.label}</span>
-                <span className={`text-base font-bold tabular-nums ${scoreColor(dim.value)}`}>
-                  {dim.value != null ? dim.value.toFixed(0) : '-'}
-                </span>
-              </div>
-              <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-[var(--color-neutral-100)] dark:bg-[var(--color-neutral-800)]">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${barColor(dim.value)}`}
-                  style={{ width: `${dim.value ?? 0}%` }}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Integrity */}
-      {trace.verification && (
-        <div className="flex items-center gap-2 text-xs">
-          {trace.verification.valid ? (
-            <>
-              <span className="text-[var(--color-success-600)]">✓</span>
-              <span className="text-[var(--color-text-secondary)]">
-                Cadena integra ({trace.verification.events_checked} eventos verificados)
-              </span>
-            </>
-          ) : (
-            <>
-              <span className="text-[var(--color-error-600)]">✗</span>
-              <span className="text-[var(--color-text-secondary)]">Cadena comprometida</span>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* 3-column content */}
-      <div className="grid gap-4 lg:grid-cols-3">
-        {/* Timeline */}
-        <div>
-          <h4 className="mb-2 text-xs font-semibold text-[var(--color-text-secondary)]">
-            Timeline ({timeline.length} eventos)
-          </h4>
-          {timeline.length === 0 ? (
-            <p className="text-xs text-[var(--color-text-tertiary)]">Sin eventos.</p>
-          ) : (
-            <div className="max-h-[400px] space-y-1.5 overflow-y-auto">
-              {timeline.map((evt) => (
-                <div key={evt.id} className="flex items-start gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] p-2">
-                  {evt.n4_level && (
-                    <span className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${N4_COLORS[evt.n4_level] ?? 'bg-gray-400'}`} title={N4_LABELS[evt.n4_level] ?? ''} />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <span className="text-xs font-medium text-[var(--color-text-primary)]">
-                      {EVENT_TYPE_LABELS[evt.event_type] ?? evt.event_type}
-                    </span>
-
-                    {(() => {
-                      const rawStatus = evt.payload.status;
-                      const status = typeof rawStatus === 'string' ? rawStatus : null;
-                      if (evt.event_type !== 'code.run' || !status) return null;
-                      return (
-                      <span className={`ml-1.5 text-[0.625rem] ${
-                        status === 'ok' || status === 'success'
-                          ? 'text-[var(--color-success-600)]'
-                          : 'text-[var(--color-error-600)]'
-                      }`}>
-                        {status}
-                      </span>
-                      );
-                    })()}
-                    <p className="text-[0.625rem] text-[var(--color-text-tertiary)]">
-                      {new Date(evt.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                      {' — seq #{' + evt.sequence_number + '}'}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Code */}
-        <div>
-          <h4 className="mb-2 text-xs font-semibold text-[var(--color-text-secondary)]">
-            Codigo ({code.length} snapshots)
-          </h4>
-          {code.length === 0 ? (
-            <p className="text-xs text-[var(--color-text-tertiary)]">Sin snapshots de codigo.</p>
-          ) : (
-            <div className="max-h-[400px] space-y-2 overflow-y-auto">
-              {code.map((snap, i) => (
-                <div key={snap.snapshot_id ?? i} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] p-2">
-                  <p className="mb-1 text-[0.625rem] text-[var(--color-text-tertiary)]">
-                    {new Date(snap.snapshot_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
-                  </p>
-                  <pre className="max-h-[200px] overflow-auto whitespace-pre-wrap rounded bg-[var(--color-neutral-100)] p-2 font-mono text-[0.625rem] leading-relaxed text-[var(--color-text-primary)] dark:bg-[var(--color-neutral-800)]">
-                    {snap.code}
-                  </pre>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Chat */}
-        <div>
-          <h4 className="mb-2 text-xs font-semibold text-[var(--color-text-secondary)]">
-            Chat con tutor ({chat.length} mensajes)
-          </h4>
-          {chat.length === 0 ? (
-            <p className="text-xs text-[var(--color-text-tertiary)]">Sin mensajes del tutor.</p>
-          ) : (
-            <div className="max-h-[400px] space-y-1.5 overflow-y-auto">
-              {chat.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`rounded-lg p-2 text-xs ${
-                    msg.role === 'user'
-                      ? 'ml-4 bg-[var(--color-accent-50)] text-[var(--color-text-primary)] dark:bg-[var(--color-accent-900)]/20'
-                      : 'mr-4 border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-primary)]'
-                  }`}
-                >
-                  <p className="mb-0.5 text-[0.5625rem] font-medium text-[var(--color-text-tertiary)]">
-                    {msg.role === 'user' ? 'Alumno' : 'Tutor'}
-                    {' — '}
-                    {new Date(msg.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
-                  </p>
-                  <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+      {/* Footer */}
+      <div className="mt-6 flex items-center justify-between border-t border-[var(--color-border)] pt-4">
+        <p className="text-[0.625rem] text-[var(--color-text-tertiary)]">
+          Generado con {report.llm_provider}/{report.model_used}
+        </p>
+        <button
+          onClick={generateOrFetchReport}
+          className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-neutral-50)] dark:hover:bg-[var(--color-neutral-800)]"
+        >
+          Regenerar informe
+        </button>
       </div>
     </div>
   );

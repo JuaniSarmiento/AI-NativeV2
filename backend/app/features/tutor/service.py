@@ -9,12 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.features.governance.service import GovernanceService
+from app.features.tutor.adversarial import AdversarialResult, get_adversarial_detector
 from app.features.tutor.context_builder import ContextBuilder
 from app.features.tutor.guardrails import GuardrailResult, GuardrailsProcessor
 from app.features.tutor.llm_adapter import ChatMessage, LLMAdapter
 from app.features.tutor.models import InteractionRole, TutorInteraction, TutorSystemPrompt
 from app.features.tutor.n4_classifier import N4Classifier, N4ClassificationResult
 from app.features.tutor.rate_limiter import RateLimitResult, TutorRateLimiter
+from app.features.tutor.reformulation_detector import ReformulationDetector
 from app.features.tutor.repositories import TutorInteractionRepository, TutorPromptRepository
 from app.shared.models.event_outbox import EventOutbox
 
@@ -125,6 +127,85 @@ class TutorService:
         user_classification = classifier.classify_message(message, "user")
         user_interaction.n4_level = user_classification.n4_level
         await self._session.flush()
+
+        # Detect prompt reformulation (compare with recent user messages)
+        await self._detect_reformulation(
+            message=message,
+            student_id=student_id,
+            exercise_id=exercise_id,
+            session_id=session_id,
+            commission_id=commission_id,
+        )
+
+        # Adversarial check — must occur BEFORE the LLM call
+        adversarial_result = get_adversarial_detector().check(
+            message, str(session_id)
+        )
+        if adversarial_result.is_adversarial:
+            standard_msg = get_adversarial_detector().standard_response()
+            now_ts = datetime.now(tz=timezone.utc).isoformat()
+
+            # Persist the adversarial assistant response
+            adversarial_interaction = TutorInteraction(
+                session_id=session_id,
+                student_id=student_id,
+                exercise_id=exercise_id,
+                role=InteractionRole.assistant,
+                content=standard_msg,
+                prompt_hash=prompt.sha256_hash,
+            )
+            self._session.add(adversarial_interaction)
+            await self._session.flush()
+
+            # Emit CTR event for adversarial detection
+            self._session.add(EventOutbox(
+                event_type="adversarial.detected",
+                payload={
+                    "interaction_id": str(adversarial_interaction.id),
+                    "student_id": str(student_id),
+                    "exercise_id": str(exercise_id),
+                    "session_id": str(session_id),
+                    "commission_id": commission_id,
+                    "category": adversarial_result.category,
+                    "attempt_number": adversarial_result.attempt_number,
+                    "timestamp": now_ts,
+                },
+            ))
+            await self._session.flush()
+
+            # Governance escalation on 3+ attempts
+            if adversarial_result.should_escalate:
+                governance = GovernanceService(self._session)
+                await governance.record_guardrail_violation(
+                    student_id=student_id,
+                    interaction_id=adversarial_interaction.id,
+                    exercise_id=exercise_id,
+                    session_id=session_id,
+                    violation_type="adversarial.escalation",
+                    violation_details=(
+                        f"Adversarial attempt #{adversarial_result.attempt_number} "
+                        f"in session {session_id} — category: {adversarial_result.category}"
+                    ),
+                )
+                logger.warning(
+                    "Adversarial escalation recorded to governance",
+                    extra={
+                        "student_id": str(student_id),
+                        "session_id": str(session_id),
+                        "attempt_number": adversarial_result.attempt_number,
+                    },
+                )
+
+            self._last_chat_result = ChatResult(
+                assistant_text=standard_msg,
+                interaction_id=adversarial_interaction.id,
+                guardrail_result=GuardrailResult.ok(),
+                tokens_used=None,
+                n4_level=None,
+                sub_classification=None,
+            )
+            yield standard_msg
+            return
 
         # Build message history for context (last 10 turns)
         history = await self._interaction_repo.get_session_messages(
@@ -327,6 +408,49 @@ class TutorService:
     # ------------------------------------------------------------------
     # Private
     # ------------------------------------------------------------------
+
+    async def _detect_reformulation(
+        self,
+        message: str,
+        student_id: uuid.UUID,
+        exercise_id: uuid.UUID,
+        session_id: uuid.UUID,
+        commission_id: str,
+    ) -> None:
+        """Check if the user message is a reformulation of a recent prompt."""
+        try:
+            recent = await self._interaction_repo.get_session_messages(session_id, limit=10)
+            recent_user_msgs = [
+                {
+                    "content": i.content,
+                    "timestamp": i.created_at.isoformat() if i.created_at else "",
+                    "interaction_id": str(i.id),
+                }
+                for i in recent
+                if i.role == InteractionRole.user
+            ]
+            now_ts = datetime.now(tz=timezone.utc).isoformat()
+            detector = ReformulationDetector()
+            result = detector.detect(message, now_ts, recent_user_msgs)
+            if result is not None:
+                self._session.add(EventOutbox(
+                    event_type="prompt.reformulated",
+                    payload={
+                        "student_id": str(student_id),
+                        "exercise_id": str(exercise_id),
+                        "session_id": str(session_id),
+                        "commission_id": commission_id,
+                        **result,
+                        "timestamp": now_ts,
+                    },
+                ))
+                await self._session.flush()
+                logger.debug(
+                    "Prompt reformulation detected",
+                    extra={"similarity": result.get("similarity_score"), "student_id": str(student_id)},
+                )
+        except Exception:
+            logger.exception("Failed to detect prompt reformulation")
 
     async def _get_active_prompt(self) -> TutorSystemPrompt:
         if self._active_prompt is None:

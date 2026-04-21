@@ -115,11 +115,46 @@ class CognitiveSessionRepository(BaseRepository[CognitiveSession]):
         return list(result.scalars().all())
 
 
+    async def get_recent_closed_sessions(
+        self,
+        student_id: uuid.UUID,
+        *,
+        limit: int = 5,
+        exclude_session_id: uuid.UUID | None = None,
+    ) -> list[CognitiveSession]:
+        """Return the most recent closed sessions for a student (B5 cross-session).
+
+        Used by CognitiveService.close_session() to fetch historical patterns
+        for the inter-iteration cross-session coherence score.
+
+        Args:
+            student_id:          UUID of the student.
+            limit:               Maximum number of sessions to return (default 5).
+            exclude_session_id:  When provided, the current session is excluded
+                                 to avoid comparing a session against itself.
+
+        Returns:
+            List of CognitiveSession ordered by closed_at DESC.
+        """
+        stmt = (
+            select(CognitiveSession)
+            .where(
+                CognitiveSession.student_id == student_id,
+                CognitiveSession.status == "closed",
+            )
+        )
+        if exclude_session_id is not None:
+            stmt = stmt.where(CognitiveSession.id != exclude_session_id)
+        stmt = stmt.order_by(CognitiveSession.closed_at.desc()).limit(limit)
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_sessions_by_commission(
         self,
         commission_id: uuid.UUID,
         student_id: uuid.UUID | None = None,
         exercise_id: uuid.UUID | None = None,
+        exercise_ids: list[uuid.UUID] | None = None,
         status: str | None = None,
         page: int = 1,
         per_page: int = 20,
@@ -132,7 +167,9 @@ class CognitiveSessionRepository(BaseRepository[CognitiveSession]):
         )
         if student_id is not None:
             base = base.where(CognitiveSession.student_id == student_id)
-        if exercise_id is not None:
+        if exercise_ids is not None:
+            base = base.where(CognitiveSession.exercise_id.in_(exercise_ids))
+        elif exercise_id is not None:
             base = base.where(CognitiveSession.exercise_id == exercise_id)
         if status is not None:
             base = base.where(CognitiveSession.status == status)

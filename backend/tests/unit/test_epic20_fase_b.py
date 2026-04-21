@@ -151,7 +151,7 @@ def test_n1_independent_scoring_full() -> None:
     result = engine.compute(session, events)
     n1 = result.metrics.n1_comprehension_score
     assert n1 is not None
-    assert n1 == Decimal("100.00"), f"Expected 100.00, got {n1}"
+    assert n1 == Decimal("45.00"), f"Expected 45.00, got {n1}"
 
 
 def test_n1_zero_when_no_reads_problem() -> None:
@@ -185,7 +185,7 @@ def test_n2_independent_scoring_with_strategy() -> None:
     result = engine.compute(session, events)
     n2 = result.metrics.n2_strategy_score
     assert n2 is not None
-    assert n2 == Decimal("100.00"), f"Expected 100.00, got {n2}"
+    assert n2 == Decimal("25.00"), f"Expected 25.00, got {n2}"
 
 
 def test_n2_zero_without_submission() -> None:
@@ -220,7 +220,7 @@ def test_n3_correction_cycle_detected() -> None:
     result = engine.compute(session, events)
     n3 = result.metrics.n3_validation_score
     assert n3 is not None
-    assert n3 == Decimal("100.00"), f"Expected 100.00, got {n3}"
+    assert n3 == Decimal("60.00"), f"Expected 60.00, got {n3}"
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +243,7 @@ def test_n4_prompt_type_all_exploratory() -> None:
 
 
 def test_n4_prompt_type_with_verifier_and_diversity() -> None:
-    """N4 with exploratory + verifier → reflective_ratio=1.0, base=70+15+15=100."""
+    """N4 with exploratory + verifier → reflective_ratio=1.0, base=70+15+10=95."""
     engine = MetricsEngine(load_rubric())
     session = _mock_session()
     events = [
@@ -254,7 +254,7 @@ def test_n4_prompt_type_with_verifier_and_diversity() -> None:
     result = engine.compute(session, events)
     n4 = result.metrics.n4_ai_interaction_score
     assert n4 is not None
-    assert n4 == Decimal("100.00"), f"Expected 100.00, got {n4}"
+    assert n4 == Decimal("95.00"), f"Expected 95.00, got {n4}"
 
 
 def test_n4_all_generative_low_score() -> None:

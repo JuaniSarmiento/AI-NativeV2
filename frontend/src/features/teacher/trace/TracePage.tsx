@@ -6,6 +6,8 @@ import CodeEvolutionPanel from './CodeEvolutionPanel';
 import ChatPanel from './ChatPanel';
 import MetricsSummaryCard from './MetricsSummaryCard';
 import IntegrityIndicator from './IntegrityIndicator';
+import SwimLanesTimeline from '@/features/teacher/components/SwimLanesTimeline';
+import AnomalyBanners from './AnomalyBanners';
 
 export default function TracePage() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -107,11 +109,17 @@ export default function TracePage() {
         )}
       </div>
 
+      {/* Anomaly banners — rendered only when backend reports anomalies */}
+      <AnomalyBanners />
+
       {/* Metrics */}
       <MetricsSummaryCard />
 
       {/* Integrity */}
       <IntegrityIndicator />
+
+      {/* Swim lanes timeline — visual process map */}
+      <SwimLanesSessionWrapper />
 
       {/* 3-column layout: Timeline | Code | Chat */}
       <div className="grid gap-6 lg:grid-cols-3">
@@ -149,6 +157,33 @@ export default function TracePage() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── SwimLanes wrapper — reads store via selectors (never destructures) ───────
+
+function SwimLanesSessionWrapper() {
+  const events = useTraceStore((s) => s.events);
+  const session = useTraceStore((s) => s.session);
+
+  if (!session || events.length === 0) return null;
+
+  const sessionEnd = session.closed_at ?? new Date().toISOString();
+
+  return (
+    <div>
+      <h2 className="mb-2 text-sm font-semibold text-[var(--color-text-primary)]">
+        Mapa de proceso cognitivo
+      </h2>
+      <p className="mb-3 text-xs text-[var(--color-text-tertiary)]">
+        Distribucion temporal de eventos por nivel N a lo largo de la sesion.
+      </p>
+      <SwimLanesTimeline
+        events={events}
+        sessionStart={session.started_at}
+        sessionEnd={sessionEnd}
+      />
     </div>
   );
 }

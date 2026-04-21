@@ -166,13 +166,13 @@ class TestQeIntegration:
 
 
 class TestQeVerification:
-    def test_single_run_gives_zero(self) -> None:
-        """Only 1 code.run event → no iterative verification → 0."""
+    def test_single_run_gives_partial_credit(self) -> None:
+        """Only 1 code.run event (no snapshots) → min(100, 1*50) = 50."""
         engine = _engine()
         session = _make_session()
         events = [_make_event("code.run", {"status": "ok"}, sequence_number=1)]
         result = engine.compute(session, events)
-        assert result.metrics.qe_verification == Decimal("0.00")
+        assert result.metrics.qe_verification == Decimal("50.00")
 
     def test_two_runs_gives_100(self) -> None:
         """2 code.run events (num/2 * 100 = 100, clamped)."""

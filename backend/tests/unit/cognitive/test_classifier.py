@@ -46,18 +46,18 @@ def test_code_execution_failed_maps_to_n3_same_canonical() -> None:
     assert result.n4_level == 3
 
 
-def test_code_snapshot_captured_maps_to_n1() -> None:
+def test_code_snapshot_captured_maps_to_lifecycle() -> None:
     result = _classify("code.snapshot.captured", {"snapshot": "x = 1"})
     assert result is not None
     assert result.event_type == "code.snapshot"
-    assert result.n4_level == 1
+    assert result.n4_level is None
 
 
-def test_exercise_submitted_maps_to_n2() -> None:
+def test_exercise_submitted_maps_to_lifecycle() -> None:
     result = _classify("exercise.submitted", {"submission_id": "abc"})
     assert result is not None
     assert result.event_type == "submission.created"
-    assert result.n4_level == 2
+    assert result.n4_level is None
 
 
 def test_tutor_session_started_maps_to_none_level() -> None:
@@ -74,11 +74,11 @@ def test_tutor_session_ended_maps_to_none_level() -> None:
     assert result.n4_level is None
 
 
-def test_reflection_submitted_maps_to_n1() -> None:
+def test_reflection_submitted_maps_to_lifecycle() -> None:
     result = _classify("reflection.submitted", {"text": "I learned..."})
     assert result is not None
     assert result.event_type == "reflection.submitted"
-    assert result.n4_level == 1
+    assert result.n4_level is None
 
 
 # ---------------------------------------------------------------------------
@@ -149,5 +149,25 @@ def test_classify_preserves_payload() -> None:
 def test_classify_tutor_preserves_payload() -> None:
     payload = {"role": "user", "content": "help", "session_id": "sess-1"}
     result = _classify("tutor.interaction.completed", payload)
+    assert result is not None
+    assert result.payload == payload
+
+
+# ---------------------------------------------------------------------------
+# Auto snapshot event (Task 9.5)
+# ---------------------------------------------------------------------------
+
+
+def test_code_snapshot_auto_maps_correctly() -> None:
+    """code.snapshot.auto must map to canonical type 'code.snapshot.auto' with n4_level=None."""
+    result = _classify("code.snapshot.auto", {"line_count": 42})
+    assert result is not None
+    assert result.event_type == "code.snapshot.auto"
+    assert result.n4_level is None
+
+
+def test_code_snapshot_auto_preserves_payload() -> None:
+    payload = {"line_count": 15, "trigger": "timer"}
+    result = _classify("code.snapshot.auto", payload)
     assert result is not None
     assert result.payload == payload

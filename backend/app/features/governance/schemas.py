@@ -88,3 +88,23 @@ class PromptHistoryListResponse(BaseModel):
     status: str = "ok"
     data: list[PromptHistoryResponse] = Field(default_factory=list)
     meta: GovernanceEventsMeta | None = None
+
+
+class CreatePromptRequest(BaseModel):
+    """Request body for creating a new system prompt with semantic versioning."""
+
+    name: str
+    content: str
+    version: str
+    change_type: str | None = Field(
+        None, pattern="^(major|minor|patch)$",
+        description="Semantic version change type",
+    )
+    change_justification: str | None = Field(
+        None, description="Justification for the change",
+    )
+
+
+class CreatePromptResponse(BaseModel):
+    status: str = "ok"
+    data: PromptHistoryResponse

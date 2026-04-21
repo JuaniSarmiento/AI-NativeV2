@@ -69,11 +69,24 @@ def _configure_root(level: str, use_json: bool) -> None:
     global _root_configured  # noqa: PLW0603
     if _root_configured:
         return
+
+    app_handler = _build_handler(use_json)
+
     root = logging.getLogger()
     root.setLevel(getattr(logging, level.upper(), logging.DEBUG))
-    # Remove any handlers added by basicConfig or uvicorn default setup
     root.handlers.clear()
-    root.addHandler(_build_handler(use_json))
+    root.addHandler(app_handler)
+
+    # Preserve uvicorn access log with its own formatting
+    for uv_name in ("uvicorn", "uvicorn.access", "uvicorn.error"):
+        uv_logger = logging.getLogger(uv_name)
+        uv_logger.handlers.clear()
+        uv_logger.addHandler(app_handler)
+        uv_logger.propagate = False
+
+    # Silence SQLAlchemy engine echo duplication — queries only show if SQL_ECHO=true
+    logging.getLogger("sqlalchemy.engine.Engine").propagate = False
+
     _root_configured = True
 
 

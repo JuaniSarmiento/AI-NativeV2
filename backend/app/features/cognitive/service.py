@@ -164,14 +164,111 @@ class CognitiveService:
             from app.features.evaluation.coherence import CoherenceEngine
             coherence_engine = CoherenceEngine(rubric)
             chat_repo = TutorInteractionRepository(self._session)
-            chat_msgs = await chat_repo.get_session_messages(session_id, limit=200)
+            chat_msgs = await chat_repo.get_messages_for_cognitive_session(
+                student_id=cognitive_session.student_id,
+                exercise_id=cognitive_session.exercise_id,
+                started_at=cognitive_session.started_at,
+                closed_at=cognitive_session.closed_at,
+                limit=200,
+            )
             _, code_entries = await self.get_code_evolution(session_id, limit=200)
-            coherence = coherence_engine.compute(events, chat_msgs, code_entries)
+
+            # B4: LLM-based code-discourse coherence — attempt before falling back to Jaccard
+            llm_discourse_score = None
+            try:
+                from app.features.evaluation.prompts.coherence_evaluation import (
+                    COHERENCE_SYSTEM_PROMPT,
+                    build_coherence_prompt,
+                )
+                from app.features.tutor.llm_adapter import ChatMessage as LLMChatMessage
+                from app.features.tutor.llm_adapter import MistralAdapter
+
+                if chat_msgs and code_entries:
+                    adapter = MistralAdapter()
+                    chat_texts = [
+                        getattr(m, "content", "")
+                        for m in chat_msgs
+                        if getattr(m, "role", "") == "user"
+                    ]
+                    last_code = code_entries[-1].get("code", "") if code_entries else ""
+                    if chat_texts and last_code:
+                        user_prompt = build_coherence_prompt(chat_texts[-10:], last_code)
+                        result_llm = await adapter.complete(
+                            messages=[LLMChatMessage(role="user", content=user_prompt)],
+                            system_prompt=COHERENCE_SYSTEM_PROMPT,
+                            max_tokens=200,
+                        )
+                        import json as _json
+                        from decimal import Decimal as _Decimal
+
+                        parsed = _json.loads(result_llm.text)
+                        llm_discourse_score = _Decimal(str(parsed["score"]))
+                        logger.info(
+                            "LLM coherence evaluation succeeded",
+                            extra={
+                                "session_id": str(session_id),
+                                "llm_score": str(llm_discourse_score),
+                                "reasoning": parsed.get("reasoning", ""),
+                            },
+                        )
+            except Exception:
+                logger.warning(
+                    "LLM coherence evaluation failed — falling back to Jaccard",
+                    extra={"session_id": str(session_id)},
+                    exc_info=True,
+                )
+
+            coherence = coherence_engine.compute(
+                events,
+                chat_msgs,
+                code_entries,
+                llm_discourse_score=llm_discourse_score,
+            )
             metrics_obj.temporal_coherence_score = coherence.temporal_coherence_score
             metrics_obj.code_discourse_score = coherence.code_discourse_score
             metrics_obj.inter_iteration_score = coherence.inter_iteration_score
             metrics_obj.coherence_anomalies = coherence.coherence_anomalies
             metrics_obj.prompt_type_distribution = coherence.prompt_type_distribution
+
+            # B5: Cross-session inter-iteration coherence
+            try:
+                from app.features.evaluation.coherence import SessionPattern
+
+                historical = await self._session_repo.get_recent_closed_sessions(
+                    cognitive_session.student_id,
+                    limit=5,
+                    exclude_session_id=session_id,
+                )
+                if historical:
+                    current_pattern = self._extract_session_pattern(events, metrics_obj)
+                    hist_patterns: list[SessionPattern] = []
+                    for hs in historical:
+                        hs_metrics = await self._metrics_repo.get_by_session(hs.id)
+                        hs_events = await self._event_repo.get_events_by_session(hs.id)
+                        if hs_metrics is not None:
+                            hist_patterns.append(
+                                self._extract_session_pattern(hs_events, hs_metrics)
+                            )
+                    if hist_patterns:
+                        cross_score = coherence_engine.compute_cross_session(
+                            current_pattern, hist_patterns
+                        )
+                        if cross_score is not None:
+                            metrics_obj.inter_iteration_score = cross_score
+                            logger.info(
+                                "Cross-session coherence computed",
+                                extra={
+                                    "session_id": str(session_id),
+                                    "cross_session_score": str(cross_score),
+                                    "historical_sessions": len(hist_patterns),
+                                },
+                            )
+            except Exception:
+                logger.warning(
+                    "Cross-session coherence failed",
+                    extra={"session_id": str(session_id)},
+                    exc_info=True,
+                )
 
             # Set n4_final_score on the session
             cognitive_session.n4_final_score = result.evaluation_profile
@@ -225,6 +322,7 @@ class CognitiveService:
         event_type: str,
         n4_level: int | None,
         payload: dict,  # type: ignore[type-arg]
+        prompt_hash: str = "",
     ) -> CognitiveEvent:
         """Append an immutable event to the hash chain of the given session.
 
@@ -234,6 +332,9 @@ class CognitiveService:
 
         n4_level is injected into the payload under the key "n4_level" so
         downstream consumers can query the level without re-classifying.
+
+        prompt_hash, when provided, is included in the hash computation (V2
+        formula) and stored in the enriched payload for future chain verification.
 
         Raises:
             ValidationError: If the session is not open.
@@ -262,14 +363,19 @@ class CognitiveService:
         enriched_payload = {**payload}
         if n4_level is not None:
             enriched_payload["n4_level"] = n4_level
+        if prompt_hash:
+            enriched_payload["prompt_hash"] = prompt_hash
 
-        event_hash = compute_event_hash(previous_hash, event_type, enriched_payload, now)
+        event_hash = compute_event_hash(
+            previous_hash, event_type, enriched_payload, now, prompt_hash=prompt_hash
+        )
 
         event = CognitiveEvent(
             session_id=session.id,
             event_type=event_type,
             sequence_number=sequence,
             payload=enriched_payload,
+            n4_level=n4_level,
             previous_hash=previous_hash,
             event_hash=event_hash,
             created_at=now,
@@ -320,7 +426,10 @@ class CognitiveService:
             }
 
         events = await self._event_repo.get_events_by_session(session_id)
-        return verify_chain(cognitive_session.genesis_hash, events)
+        chain_version = getattr(cognitive_session, "chain_version", 1)
+        return verify_chain(
+            cognitive_session.genesis_hash, events, chain_version=chain_version
+        )
 
     # ------------------------------------------------------------------
     # Trace / Timeline / Code Evolution (EPIC-16)
@@ -432,16 +541,27 @@ class CognitiveService:
         metrics = await self._metrics_repo.get_by_session(session_id)
 
         # Chat messages are stored in operational.tutor_interactions.
+        # The tutor uses its own session_id (not cognitive_session.id), so we
+        # correlate by student_id + exercise_id + time window.
         chat_repo = TutorInteractionRepository(self._session)
-        chat = await chat_repo.get_session_messages(session_id, limit=messages_limit)
+        chat = await chat_repo.get_messages_for_cognitive_session(
+            student_id=cognitive_session.student_id,
+            exercise_id=cognitive_session.exercise_id,
+            started_at=cognitive_session.started_at,
+            closed_at=cognitive_session.closed_at,
+            limit=messages_limit,
+        )
 
         # Snapshots are stored in operational.code_snapshots.
         _session2, code_evolution = await self.get_code_evolution(
             session_id, limit=snapshots_limit
         )
 
+        chain_version = getattr(cognitive_session, "chain_version", 1)
         verification = (
-            verify_chain(cognitive_session.genesis_hash, events)
+            verify_chain(
+                cognitive_session.genesis_hash, events, chain_version=chain_version
+            )
             if cognitive_session.genesis_hash is not None
             else None
         )
@@ -454,6 +574,76 @@ class CognitiveService:
             "metrics": metrics,
             "verification": verification,
         }
+
+    # ------------------------------------------------------------------
+    # B5 — Session pattern extraction helper
+    # ------------------------------------------------------------------
+
+    def _extract_session_pattern(
+        self,
+        events: list[Any],
+        metrics: Any,
+    ) -> "SessionPattern":
+        """Extract a SessionPattern from a session's events and metrics.
+
+        This is a pure helper (no I/O) used both for the current session
+        and for historical sessions during cross-session scoring.
+
+        Args:
+            events:  List of CognitiveEvent ORM instances ordered by
+                     sequence_number ASC.
+            metrics: CognitiveMetrics ORM instance (may be partially
+                     populated for the current session).
+
+        Returns:
+            SessionPattern with normalised ratios.
+        """
+        from app.features.evaluation.coherence import SessionPattern
+
+        total = len(events)
+
+        # N1 ratio: events flagged at n4_level == 1 / total events
+        n1_count = sum(1 for e in events if getattr(e, "n4_level", None) == 1)
+        n1_ratio = n1_count / total if total > 0 else 0.0
+
+        # N3 ratio: events flagged at n4_level == 3 / total events
+        n3_count = sum(1 for e in events if getattr(e, "n4_level", None) == 3)
+        n3_ratio = n3_count / total if total > 0 else 0.0
+
+        # Exploratory prompt ratio
+        tutor_events = [e for e in events if e.event_type == "tutor.question_asked"]
+        if tutor_events:
+            exploratory_count = sum(
+                1
+                for e in tutor_events
+                if isinstance(e.payload, dict) and e.payload.get("prompt_type") == "exploratory"
+            )
+            exploratory_prompt_ratio = exploratory_count / len(tutor_events)
+        else:
+            exploratory_prompt_ratio = 0.0
+
+        # Post-tutor verification: any code.run after a tutor.response_received
+        tutor_resp_events = [e for e in events if e.event_type == "tutor.response_received"]
+        run_events = [e for e in events if e.event_type == "code.run"]
+        has_post_tutor_verification = False
+        if tutor_resp_events and run_events:
+            resp_seqs = [getattr(e, "sequence_number", 0) for e in tutor_resp_events]
+            run_seqs = [getattr(e, "sequence_number", 0) for e in run_events]
+            has_post_tutor_verification = any(
+                rs > rsp for rs in run_seqs for rsp in resp_seqs
+            )
+
+        # Qe score from metrics (may be Decimal or None)
+        qe_raw = getattr(metrics, "qe_score", None)
+        qe_score = float(qe_raw) if qe_raw is not None else None
+
+        return SessionPattern(
+            n1_ratio=n1_ratio,
+            n3_ratio=n3_ratio,
+            exploratory_prompt_ratio=exploratory_prompt_ratio,
+            has_post_tutor_verification=has_post_tutor_verification,
+            qe_score=qe_score,
+        )
 
     # ------------------------------------------------------------------
     # Stale session cleanup

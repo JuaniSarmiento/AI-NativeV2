@@ -83,24 +83,34 @@ class CognitiveMetricsRepository(BaseRepository[CognitiveMetrics]):
     ) -> dict[str, Any]:
         """Return AVG scores, risk level distribution, and student count for a commission.
 
-        The query joins cognitive_metrics → cognitive_sessions (same schema).
-        commission_id and exercise_id are denormalised on cognitive_sessions
-        so no cross-schema join is needed.
+        Uses DISTINCT ON (student_id) ORDER BY computed_at DESC to get the latest
+        metrics per student, then averages over those latest rows. This avoids
+        inflating scores from students with many sessions.
         """
         from app.features.cognitive.models import CognitiveSession
+        from sqlalchemy import text
+        from sqlalchemy.dialects.postgresql import aggregate_order_by
 
-        base = (
-            select(CognitiveMetrics)
+        # Subquery: latest metrics per student
+        latest_sub = (
+            select(
+                CognitiveMetrics.id.label("metrics_id"),
+                CognitiveSession.student_id.label("student_id"),
+            )
             .join(
                 CognitiveSession,
                 CognitiveMetrics.session_id == CognitiveSession.id,
             )
             .where(CognitiveSession.commission_id == commission_id)
+            .distinct(CognitiveSession.student_id)
+            .order_by(CognitiveSession.student_id, CognitiveMetrics.computed_at.desc())
         )
         if exercise_id is not None:
-            base = base.where(CognitiveSession.exercise_id == exercise_id)
+            latest_sub = latest_sub.where(CognitiveSession.exercise_id == exercise_id)
 
-        # Aggregate query
+        latest_sub = latest_sub.subquery("latest_per_student")
+
+        # Aggregate over the latest metrics only
         agg_stmt = select(
             func.avg(CognitiveMetrics.n1_comprehension_score).label("avg_n1"),
             func.avg(CognitiveMetrics.n2_strategy_score).label("avg_n2"),
@@ -108,34 +118,27 @@ class CognitiveMetricsRepository(BaseRepository[CognitiveMetrics]):
             func.avg(CognitiveMetrics.n4_ai_interaction_score).label("avg_n4"),
             func.avg(CognitiveMetrics.qe_score).label("avg_qe"),
             func.avg(CognitiveMetrics.dependency_score).label("avg_dependency"),
-            func.count(func.distinct(CognitiveSession.student_id)).label("student_count"),
+            func.count(latest_sub.c.student_id).label("student_count"),
         ).select_from(
             CognitiveMetrics.__table__.join(
-                CognitiveSession.__table__,
-                CognitiveMetrics.__table__.c.session_id == CognitiveSession.__table__.c.id,
+                latest_sub,
+                CognitiveMetrics.__table__.c.id == latest_sub.c.metrics_id,
             )
-        ).where(CognitiveSession.commission_id == commission_id)
-
-        if exercise_id is not None:
-            agg_stmt = agg_stmt.where(CognitiveSession.exercise_id == exercise_id)
+        )
 
         agg_result = (await self._session.execute(agg_stmt)).one_or_none()
 
-        # Risk level distribution
+        # Risk level distribution (also from latest per student)
         risk_stmt = select(
             CognitiveMetrics.risk_level,
             func.count(CognitiveMetrics.id).label("count"),
         ).select_from(
             CognitiveMetrics.__table__.join(
-                CognitiveSession.__table__,
-                CognitiveMetrics.__table__.c.session_id == CognitiveSession.__table__.c.id,
+                latest_sub,
+                CognitiveMetrics.__table__.c.id == latest_sub.c.metrics_id,
             )
-        ).where(CognitiveSession.commission_id == commission_id)
+        ).group_by(CognitiveMetrics.risk_level)
 
-        if exercise_id is not None:
-            risk_stmt = risk_stmt.where(CognitiveSession.exercise_id == exercise_id)
-
-        risk_stmt = risk_stmt.group_by(CognitiveMetrics.risk_level)
         risk_rows = (await self._session.execute(risk_stmt)).all()
         risk_distribution = {row.risk_level or "unknown": row.count for row in risk_rows}
 

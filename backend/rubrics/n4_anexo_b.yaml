@@ -47,6 +47,12 @@ quality_factors:
     verifier_bonus: 15
     diversity_bonus: 15
 
+qe_weights:
+  n1: 0.25
+  n2: 0.25
+  n3: 0.25
+  n4: 0.25
+
 coherence:
   external_integration_threshold_lines: 50
   external_integration_lookback_minutes: 5

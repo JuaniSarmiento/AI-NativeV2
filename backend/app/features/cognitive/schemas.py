@@ -196,6 +196,7 @@ class TraceResponse(BaseModel):
     chat: list[TraceChatMessageResponse] = []
     metrics: CognitiveMetricsResponse | None = None
     verification: VerifyResponse | None = None
+    anomalies: dict | None = None  # type: ignore[type-arg]  # EPIC-20: coherence_anomalies from CognitiveMetrics
 
 
 class TraceStandardResponse(BaseModel):

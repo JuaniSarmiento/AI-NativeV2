@@ -1,10 +1,17 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { useTeacherDashboardStore } from './store';
 import { apiClient } from '@/shared/lib/api-client';
-import type { StudentSummary, RiskLevel, SortField } from './types';
-import { RISK_LABELS, RISK_DESCRIPTIONS } from './types';
+import type { StudentSummary, RiskLevel, SortField, AppropriationType } from './types';
+import {
+  RISK_LABELS,
+  RISK_DESCRIPTIONS,
+  APPROPRIATION_LABELS,
+  APPROPRIATION_BADGE_CLASSES,
+} from './types';
 import RiskBadge from './RiskBadge';
+import { CoherenceSemaphores } from './CoherenceSemaphores';
+import { ScoreBreakdown } from './ScoreBreakdown';
 
 interface CommissionOption {
   id: string;
@@ -13,14 +20,22 @@ interface CommissionOption {
   semester: number;
 }
 
-interface ExerciseOption {
+interface ActivityOption {
   id: string;
   title: string;
+  course_id?: string;
 }
 
 const EMPTY_COMMISSIONS: CommissionOption[] = [];
-const EMPTY_EXERCISES: ExerciseOption[] = [];
+const EMPTY_ACTIVITIES: ActivityOption[] = [];
 const EMPTY_STUDENTS: StudentSummary[] = [];
+
+const APPROPRIATION_ORDER: Record<string, number> = {
+  Autonomo: 0,
+  Reflexiva: 1,
+  Superficial: 2,
+  Delegacion: 3,
+};
 
 function riskSortValue(level: string | null): number {
   const order: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
@@ -37,6 +52,13 @@ function scoreColor(val: number | null): string {
   if (val >= 70) return 'text-[var(--color-success-600)] dark:text-[var(--color-success-400)]';
   if (val >= 40) return 'text-[var(--color-warning-600)] dark:text-[var(--color-warning-400)]';
   return 'text-[var(--color-error-600)] dark:text-[var(--color-error-400)]';
+}
+
+function scoreBarColor(val: number | null): string {
+  if (val === null) return 'bg-[var(--color-neutral-200)] dark:bg-[var(--color-neutral-700)]';
+  if (val >= 70) return 'bg-[var(--color-success-500)]';
+  if (val >= 40) return 'bg-[var(--color-warning-500)]';
+  return 'bg-[var(--color-error-500)]';
 }
 
 export default function TeacherDashboard() {
@@ -58,15 +80,16 @@ export default function TeacherDashboard() {
   const triggerAssessment = useTeacherDashboardStore((s) => s.triggerAssessment);
 
   const [commissions, setCommissions] = useState<CommissionOption[]>(EMPTY_COMMISSIONS);
-  const [exercises, setExercises] = useState<ExerciseOption[]>(EMPTY_EXERCISES);
+  const [activities, setActivities] = useState<ActivityOption[]>(EMPTY_ACTIVITIES);
   const [commissionId, setCommissionId] = useState(searchParams.get('commission') ?? '');
-  const [exerciseId, setExerciseId] = useState('');
+  const [activityId, setActivityId] = useState('');
   const [isAssessing, setIsAssessing] = useState(false);
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
 
   useEffect(() => {
     if (!courseId) return;
     setCommissionId(searchParams.get('commission') ?? '');
-    setExerciseId('');
+    setActivityId('');
   }, [courseId]);
 
   useEffect(() => {
@@ -75,7 +98,11 @@ export default function TeacherDashboard() {
       .get(`/v1/courses/${courseId}/commissions?per_page=50`)
       .then((res) => {
         const envelope = res.data as { data?: CommissionOption[] };
-        const items = Array.isArray(envelope.data) ? envelope.data : Array.isArray(res.data) ? res.data as unknown as CommissionOption[] : [];
+        const items = Array.isArray(envelope.data)
+          ? envelope.data
+          : Array.isArray(res.data)
+            ? (res.data as unknown as CommissionOption[])
+            : [];
         setCommissions(items);
         if (items.length > 0) {
           setCommissionId((prev) => {
@@ -87,21 +114,27 @@ export default function TeacherDashboard() {
       .catch(() => setCommissions(EMPTY_COMMISSIONS));
 
     apiClient
-      .get(`/v1/courses/${courseId}/exercises?per_page=100`)
+      .get(`/v1/activities?course_id=${courseId}&per_page=100`)
       .then((res) => {
-        const envelope = res.data as { data?: ExerciseOption[] };
-        const all = Array.isArray(envelope.data) ? envelope.data : Array.isArray(res.data) ? res.data as unknown as ExerciseOption[] : [];
-        setExercises(all);
+        const envelope = res.data as { data?: ActivityOption[] };
+        const all = Array.isArray(envelope.data)
+          ? envelope.data
+          : Array.isArray(res.data)
+            ? (res.data as unknown as ActivityOption[])
+            : [];
+        setActivities(all);
       })
-      .catch(() => setExercises(EMPTY_EXERCISES));
+      .catch(() => setActivities(EMPTY_ACTIVITIES));
   }, [courseId]);
 
   useEffect(() => {
     if (courseId && commissionId) {
-      fetchDashboard(courseId, commissionId, exerciseId || undefined);
+      // Pass no exercise_id filter when an activity is selected — filtering happens in student trace.
+      // The dashboard shows aggregate metrics across all exercises in the commission.
+      fetchDashboard(courseId, commissionId, undefined);
       fetchRisks(commissionId);
     }
-  }, [courseId, commissionId, exerciseId, fetchDashboard, fetchRisks]);
+  }, [courseId, commissionId, activityId, fetchDashboard, fetchRisks]);
 
   const students = dashboard?.students ?? EMPTY_STUDENTS;
   const filtered = riskFilter
@@ -121,8 +154,23 @@ export default function TeacherDashboard() {
     if (sortField === 'session_count') {
       return (a.session_count - b.session_count) * dir;
     }
-    if (sortField === 'latest_qe') {
-      return ((a.latest_qe ?? 0) - (b.latest_qe ?? 0)) * dir;
+    if (sortField === 'latest_appropriation_type') {
+      const aOrd = APPROPRIATION_ORDER[a.latest_appropriation_type ?? ''] ?? 99;
+      const bOrd = APPROPRIATION_ORDER[b.latest_appropriation_type ?? ''] ?? 99;
+      return (aOrd - bOrd) * dir;
+    }
+    // Numeric sort: latest_n1, latest_n2, latest_n3, latest_n4, latest_qe
+    const numericFields: SortField[] = [
+      'latest_n1',
+      'latest_n2',
+      'latest_n3',
+      'latest_n4',
+      'latest_qe',
+    ];
+    if (numericFields.includes(sortField)) {
+      return (
+        ((a[sortField] as number | null) ?? 0) - ((b[sortField] as number | null) ?? 0)
+      ) * dir;
     }
     return 0;
   });
@@ -140,12 +188,13 @@ export default function TeacherDashboard() {
   };
 
   const handleViewTrace = (studentId: string) => {
-    if (!commissionId) return;
-    navigate(`/teacher/students/${studentId}/activity?commission=${commissionId}`);
+    if (!commissionId || !activityId) return;
+    const params = new URLSearchParams({ commission: commissionId, activity_id: activityId });
+    navigate(`/teacher/students/${studentId}/activity?${params.toString()}`);
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8 px-4 py-6">
+    <div className="mx-auto max-w-7xl space-y-8 px-4 py-6">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-[var(--color-text-primary)]">
@@ -165,7 +214,7 @@ export default function TeacherDashboard() {
           <select
             value={commissionId}
             onChange={(e) => setCommissionId(e.target.value)}
-            className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent-500)] focus:ring-1 focus:ring-[var(--color-accent-500)]"
+            className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent-500)] focus:ring-1 focus:ring-[var(--color-accent-500)]"
           >
             <option value="">Seleccionar comision</option>
             {commissions.map((c) => (
@@ -181,14 +230,14 @@ export default function TeacherDashboard() {
             Actividad
           </label>
           <select
-            value={exerciseId}
-            onChange={(e) => setExerciseId(e.target.value)}
-            className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent-500)] focus:ring-1 focus:ring-[var(--color-accent-500)]"
+            value={activityId}
+            onChange={(e) => setActivityId(e.target.value)}
+            className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent-500)] focus:ring-1 focus:ring-[var(--color-accent-500)]"
           >
             <option value="">Todas las actividades</option>
-            {exercises.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.title}
+            {activities.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.title}
               </option>
             ))}
           </select>
@@ -201,7 +250,7 @@ export default function TeacherDashboard() {
           <select
             value={riskFilter ?? ''}
             onChange={(e) => setRiskFilter(e.target.value || null)}
-            className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent-500)] focus:ring-1 focus:ring-[var(--color-accent-500)]"
+            className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent-500)] focus:ring-1 focus:ring-[var(--color-accent-500)]"
           >
             <option value="">Todos</option>
             {(['critical', 'high', 'medium', 'low'] as const).map((level) => (
@@ -216,7 +265,7 @@ export default function TeacherDashboard() {
           <button
             onClick={handleAssess}
             disabled={isAssessing}
-            className="rounded-lg bg-[var(--color-accent-600)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--color-accent-700)] disabled:opacity-50"
+            className="min-h-11 rounded-lg bg-[var(--color-accent-600)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--color-accent-700)] disabled:opacity-50"
           >
             {isAssessing ? 'Evaluando...' : 'Evaluar Riesgo'}
           </button>
@@ -232,7 +281,9 @@ export default function TeacherDashboard() {
       )}
       {error && (
         <div className="rounded-xl border border-[var(--color-error-200)] bg-[var(--color-error-50)] p-4 dark:border-[var(--color-error-800)] dark:bg-[var(--color-error-900)]/20">
-          <p className="text-sm text-[var(--color-error-700)] dark:text-[var(--color-error-400)]">{error}</p>
+          <p className="text-sm text-[var(--color-error-700)] dark:text-[var(--color-error-400)]">
+            {error}
+          </p>
         </div>
       )}
 
@@ -266,30 +317,96 @@ export default function TeacherDashboard() {
               Como leer este dashboard
             </h2>
             <p className="mt-2 text-xs leading-relaxed text-[var(--color-text-secondary)]">
-              Este panel analiza el <strong>proceso cognitivo</strong> de cada alumno, no solo si el codigo funciona.
-              La <strong>Calidad Epistemica (Qe)</strong> mide que tan bien razona el alumno: si comprende el problema,
-              planifica una estrategia, valida sus soluciones y usa la IA como herramienta de aprendizaje (no como oraculo).
-              El <strong>nivel de riesgo</strong> indica si un alumno necesita atencion: un riesgo alto puede significar
-              dependencia excesiva de la IA, desvinculacion del proceso, o estancamiento. Hace click en un alumno para
-              ver el detalle de su traza cognitiva.
+              Este panel analiza el <strong>proceso cognitivo</strong> de cada alumno, no solo si el
+              codigo funciona. La <strong>Calidad Epistemica (Qe)</strong> mide que tan bien razona
+              el alumno: si comprende el problema, planifica una estrategia, valida sus soluciones y
+              usa la IA como herramienta de aprendizaje (no como oraculo). El{' '}
+              <strong>nivel de riesgo</strong> indica si un alumno necesita atencion: un riesgo alto
+              puede significar dependencia excesiva de la IA, desvinculacion del proceso, o
+              estancamiento. La columna <strong>Apropiacion</strong> clasifica el patron de uso de
+              IA del alumno. Hace click en un alumno para ver el detalle de su traza cognitiva.
             </p>
           </div>
 
           {/* Students table */}
           <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
             <div className="border-b border-[var(--color-border)] px-5 py-3">
-              <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">
-                Alumnos
-              </h2>
+              <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Alumnos</h2>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="border-b border-[var(--color-border)] bg-[var(--color-neutral-50)] dark:bg-[var(--color-neutral-800)]/30">
-                    <SortHeader field="student_name" label="Alumno" current={sortField} direction={sortDirection} onSort={setSort} />
-                    <SortHeader field="session_count" label="Sesiones" current={sortField} direction={sortDirection} onSort={setSort} />
-                    <SortHeader field="latest_qe" label="Qe" current={sortField} direction={sortDirection} onSort={setSort} />
-                    <SortHeader field="latest_risk_level" label="Riesgo" current={sortField} direction={sortDirection} onSort={setSort} />
+                    <SortHeader
+                      field="student_name"
+                      label="Alumno"
+                      current={sortField}
+                      direction={sortDirection}
+                      onSort={setSort}
+                    />
+                    <SortHeader
+                      field="session_count"
+                      label="Sesiones"
+                      current={sortField}
+                      direction={sortDirection}
+                      onSort={setSort}
+                    />
+                    {/* Static N1-N4 mini-bars header */}
+                    <th className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-[var(--color-text-tertiary)]">
+                      N1&#8211;N4
+                    </th>
+                    <SortHeader
+                      field="latest_n1"
+                      label="N1"
+                      current={sortField}
+                      direction={sortDirection}
+                      onSort={setSort}
+                    />
+                    <SortHeader
+                      field="latest_n2"
+                      label="N2"
+                      current={sortField}
+                      direction={sortDirection}
+                      onSort={setSort}
+                    />
+                    <SortHeader
+                      field="latest_n3"
+                      label="N3"
+                      current={sortField}
+                      direction={sortDirection}
+                      onSort={setSort}
+                    />
+                    <SortHeader
+                      field="latest_n4"
+                      label="N4"
+                      current={sortField}
+                      direction={sortDirection}
+                      onSort={setSort}
+                    />
+                    <SortHeader
+                      field="latest_qe"
+                      label="Qe"
+                      current={sortField}
+                      direction={sortDirection}
+                      onSort={setSort}
+                    />
+                    <th className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-[var(--color-text-tertiary)]">
+                      Coherencia
+                    </th>
+                    <SortHeader
+                      field="latest_appropriation_type"
+                      label="Apropiacion"
+                      current={sortField}
+                      direction={sortDirection}
+                      onSort={setSort}
+                    />
+                    <SortHeader
+                      field="latest_risk_level"
+                      label="Riesgo"
+                      current={sortField}
+                      direction={sortDirection}
+                      onSort={setSort}
+                    />
                     <th className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-[var(--color-text-tertiary)]">
                       Accion
                     </th>
@@ -297,19 +414,23 @@ export default function TeacherDashboard() {
                 </thead>
                 <tbody>
                   {sorted.map((student) => (
+                    <React.Fragment key={student.student_id}>
                     <tr
-                      key={student.student_id}
                       className={`cursor-pointer border-b border-[var(--color-border)]/50 transition-colors hover:bg-[var(--color-neutral-50)] dark:hover:bg-[var(--color-neutral-800)]/20 ${
                         selectedStudentId === student.student_id
                           ? 'bg-[var(--color-accent-50)]/60 dark:bg-[var(--color-accent-900)]/10'
                           : ''
                       }`}
-                      onClick={() =>
+                      onClick={() => {
                         setSelectedStudent(
                           selectedStudentId === student.student_id ? null : student.student_id,
-                        )
-                      }
+                        );
+                        setExpandedRow(
+                          expandedRow === student.student_id ? null : student.student_id,
+                        );
+                      }}
                     >
+                      {/* Alumno */}
                       <td className="px-4 py-3">
                         <div className="flex flex-col">
                           <span className="font-medium text-[var(--color-text-primary)]">
@@ -320,14 +441,57 @@ export default function TeacherDashboard() {
                           </span>
                         </div>
                       </td>
+                      {/* Sesiones */}
                       <td className="px-4 py-3 tabular-nums text-[var(--color-text-primary)]">
                         {student.session_count}
                       </td>
+                      {/* N1-N4 mini-bars */}
                       <td className="px-4 py-3">
-                        <span className={`text-lg font-bold tabular-nums ${scoreColor(student.latest_qe)}`}>
+                        <N1N4MiniBars student={student} />
+                      </td>
+                      {/* N1 score */}
+                      <td className="px-4 py-3 tabular-nums">
+                        <span className={`text-sm font-semibold ${scoreColor(student.latest_n1)}`}>
+                          {formatScore(student.latest_n1)}
+                        </span>
+                      </td>
+                      {/* N2 score */}
+                      <td className="px-4 py-3 tabular-nums">
+                        <span className={`text-sm font-semibold ${scoreColor(student.latest_n2)}`}>
+                          {formatScore(student.latest_n2)}
+                        </span>
+                      </td>
+                      {/* N3 score */}
+                      <td className="px-4 py-3 tabular-nums">
+                        <span className={`text-sm font-semibold ${scoreColor(student.latest_n3)}`}>
+                          {formatScore(student.latest_n3)}
+                        </span>
+                      </td>
+                      {/* N4 score — "Sin interaccion" when null */}
+                      <td className="px-4 py-3 tabular-nums">
+                        <N4Cell value={student.latest_n4} />
+                      </td>
+                      {/* Qe */}
+                      <td className="px-4 py-3">
+                        <span
+                          className={`text-lg font-bold tabular-nums ${scoreColor(student.latest_qe)}`}
+                        >
                           {formatScore(student.latest_qe)}
                         </span>
                       </td>
+                      {/* Coherencia semaphores */}
+                      <td className="px-4 py-3">
+                        <CoherenceSemaphores
+                          temporal={student.latest_temporal_coherence}
+                          codeDiscourse={student.latest_code_discourse}
+                          interIteration={student.latest_inter_iteration}
+                        />
+                      </td>
+                      {/* Apropiacion badge */}
+                      <td className="px-4 py-3">
+                        <AppropriationBadge type={student.latest_appropriation_type} />
+                      </td>
+                      {/* Riesgo */}
                       <td className="px-4 py-3">
                         {student.latest_risk_level ? (
                           <RiskBadge level={student.latest_risk_level as RiskLevel} />
@@ -335,22 +499,39 @@ export default function TeacherDashboard() {
                           <span className="text-xs text-[var(--color-text-tertiary)]">-</span>
                         )}
                       </td>
+                      {/* Accion */}
                       <td className="px-4 py-3">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             handleViewTrace(student.student_id);
                           }}
-                          className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-accent-600)] transition-colors hover:bg-[var(--color-accent-50)] dark:hover:bg-[var(--color-accent-900)]/10"
+                          className="min-h-11 min-w-11 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-accent-600)] transition-colors hover:bg-[var(--color-accent-50)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-500)] dark:hover:bg-[var(--color-accent-900)]/10"
                         >
                           Ver traza
                         </button>
                       </td>
                     </tr>
+                    {expandedRow === student.student_id && (
+                      <tr
+                        className="border-b border-[var(--color-border)]/50 bg-[var(--color-surface-alt)]"
+                      >
+                        <td
+                          colSpan={13}
+                          className="px-6 py-2"
+                        >
+                          <ScoreBreakdown breakdown={student.latest_score_breakdown} />
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   ))}
                   {sorted.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="px-4 py-12 text-center text-sm text-[var(--color-text-tertiary)]">
+                      <td
+                        colSpan={12}
+                        className="px-4 py-12 text-center text-sm text-[var(--color-text-tertiary)]"
+                      >
                         {riskFilter
                           ? `Sin alumnos con riesgo "${RISK_LABELS[riskFilter as RiskLevel] ?? riskFilter}".`
                           : 'Sin datos de alumnos para esta comision.'}
@@ -364,7 +545,11 @@ export default function TeacherDashboard() {
 
           {/* Selected student detail */}
           {selectedStudent && (
-            <StudentDetailCard student={selectedStudent} commissionId={commissionId} />
+            <StudentDetailCard
+              student={selectedStudent}
+              commissionId={commissionId}
+              activityId={activityId}
+            />
           )}
         </>
       )}
@@ -384,6 +569,84 @@ export default function TeacherDashboard() {
   );
 }
 
+// ── N1-N4 mini-bars ──────────────────────────────────────────────────────────
+
+const N_DIMENSIONS: {
+  key: 'latest_n1' | 'latest_n2' | 'latest_n3' | 'latest_n4';
+  label: string;
+}[] = [
+  { key: 'latest_n1', label: 'N1' },
+  { key: 'latest_n2', label: 'N2' },
+  { key: 'latest_n3', label: 'N3' },
+  { key: 'latest_n4', label: 'N4' },
+];
+
+function N1N4MiniBars({ student }: { student: StudentSummary }) {
+  return (
+    <div className="flex flex-col gap-0.5" aria-label="Puntajes N1 a N4">
+      {N_DIMENSIONS.map((dim) => {
+        const val = student[dim.key];
+        const isN4 = dim.key === 'latest_n4';
+        const title =
+          isN4 && val === null
+            ? `${dim.label}: Sin interaccion con tutor`
+            : `${dim.label}: ${val != null ? val.toFixed(1) : 'Sin datos'}`;
+        return (
+          <div key={dim.key} className="flex items-center gap-1.5" title={title}>
+            <span className="w-4 shrink-0 text-[0.5625rem] font-medium text-[var(--color-text-tertiary)]">
+              {dim.label}
+            </span>
+            <div className="h-1.5 w-16 overflow-hidden rounded-full bg-[var(--color-neutral-100)] dark:bg-[var(--color-neutral-800)]">
+              {isN4 && val === null ? (
+                <div className="h-full w-full rounded-full bg-[var(--color-neutral-200)] dark:bg-[var(--color-neutral-700)]" />
+              ) : (
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${scoreBarColor(val)}`}
+                  style={{ width: `${val ?? 0}%` }}
+                />
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── N4 cell — "Sin interaccion" when null ────────────────────────────────────
+
+function N4Cell({ value }: { value: number | null }) {
+  if (value === null) {
+    return (
+      <span className="text-[0.625rem] font-medium italic text-[var(--color-text-tertiary)]">
+        Sin interaccion
+      </span>
+    );
+  }
+  return (
+    <span className={`text-sm font-semibold tabular-nums ${scoreColor(value)}`}>
+      {value.toFixed(0)}
+    </span>
+  );
+}
+
+// ── Appropriation badge ──────────────────────────────────────────────────────
+
+function AppropriationBadge({ type }: { type: AppropriationType | null | undefined }) {
+  if (!type) {
+    return <span className="text-[0.6875rem] text-[var(--color-text-tertiary)]">Sin datos</span>;
+  }
+  return (
+    <span
+      className={`inline-block rounded-full px-2.5 py-0.5 text-[0.6875rem] font-semibold uppercase tracking-[0.08em] ${APPROPRIATION_BADGE_CLASSES[type]}`}
+    >
+      {APPROPRIATION_LABELS[type]}
+    </span>
+  );
+}
+
+// ── Overview card ────────────────────────────────────────────────────────────
+
 function OverviewCard({
   label,
   value,
@@ -398,13 +661,17 @@ function OverviewCard({
   return (
     <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
       <p className="text-xs font-medium text-[var(--color-text-tertiary)]">{label}</p>
-      <p className={`mt-1 text-2xl font-bold tabular-nums tracking-tight ${valueColor ?? 'text-[var(--color-text-primary)]'}`}>
+      <p
+        className={`mt-1 text-2xl font-bold tabular-nums tracking-tight ${valueColor ?? 'text-[var(--color-text-primary)]'}`}
+      >
         {value}
       </p>
       <p className="mt-0.5 text-xs text-[var(--color-text-tertiary)]">{description}</p>
     </div>
   );
 }
+
+// ── Risk overview bar chart ──────────────────────────────────────────────────
 
 function RiskOverviewCard({
   distribution,
@@ -429,14 +696,20 @@ function RiskOverviewCard({
             low: 'bg-[var(--color-success-500)]',
           };
           return (
-            <div key={level} className="flex flex-1 flex-col items-center gap-1" title={`${RISK_LABELS[level]}: ${count}`}>
+            <div
+              key={level}
+              className="flex flex-1 flex-col items-center gap-1"
+              title={`${RISK_LABELS[level]}: ${count}`}
+            >
               <div className="flex h-12 w-full items-end justify-center">
                 <div
                   className={`w-full rounded-t ${colorMap[level]} transition-all duration-500`}
                   style={{ height: `${Math.max(pct, count > 0 ? 15 : 0)}%` }}
                 />
               </div>
-              <span className="text-[0.625rem] font-medium text-[var(--color-text-tertiary)]">{count}</span>
+              <span className="text-[0.625rem] font-medium text-[var(--color-text-tertiary)]">
+                {count}
+              </span>
             </div>
           );
         })}
@@ -450,6 +723,8 @@ function RiskOverviewCard({
     </div>
   );
 }
+
+// ── Sort header ──────────────────────────────────────────────────────────────
 
 function SortHeader({
   field,
@@ -472,11 +747,15 @@ function SortHeader({
     >
       {label}
       {isActive && (
-        <span className="ml-1">{direction === 'asc' ? '\u2191' : '\u2193'}</span>
+        <span className="ml-1" aria-hidden="true">
+          {direction === 'asc' ? '\u2191' : '\u2193'}
+        </span>
       )}
     </th>
   );
 }
+
+// ── Student detail card ──────────────────────────────────────────────────────
 
 interface SessionItem {
   id: string;
@@ -489,9 +768,11 @@ interface SessionItem {
 function StudentDetailCard({
   student,
   commissionId,
+  activityId,
 }: {
   student: StudentSummary;
   commissionId: string;
+  activityId: string;
 }) {
   const navigate = useNavigate();
   const [sessions, setSessions] = useState<SessionItem[]>([]);
@@ -502,22 +783,46 @@ function StudentDetailCard({
     setLoadingSessions(true);
     apiClient
       .get(
-        `/v1/cognitive/sessions?commission_id=${commissionId}&student_id=${student.student_id}&per_page=20`,
+        `/v1/cognitive/sessions?commission_id=${commissionId}&student_id=${student.student_id}${activityId ? `&activity_id=${activityId}` : ''}&per_page=20`,
       )
       .then((res) => {
         const envelope = res.data as { data?: SessionItem[] };
-        const items = Array.isArray(envelope.data) ? envelope.data : Array.isArray(res.data) ? res.data as unknown as SessionItem[] : [];
+        const items = Array.isArray(envelope.data)
+          ? envelope.data
+          : Array.isArray(res.data)
+            ? (res.data as unknown as SessionItem[])
+            : [];
         setSessions(items);
       })
       .catch(() => setSessions([]))
       .finally(() => setLoadingSessions(false));
-  }, [commissionId, student.student_id]);
+  }, [commissionId, student.student_id, activityId]);
 
   const dimensions = [
-    { key: 'n1', label: 'Comprension', value: student.latest_n1, description: 'Entiende el problema antes de escribir codigo?' },
-    { key: 'n2', label: 'Estrategia', value: student.latest_n2, description: 'Planifica su solucion o va directo al codigo?' },
-    { key: 'n3', label: 'Validacion', value: student.latest_n3, description: 'Prueba y corrige su propio razonamiento?' },
-    { key: 'n4', label: 'Uso de IA', value: student.latest_n4, description: 'Usa la IA criticamente o como oraculo?' },
+    {
+      key: 'n1',
+      label: 'Comprension',
+      value: student.latest_n1,
+      description: 'Entiende el problema antes de escribir codigo?',
+    },
+    {
+      key: 'n2',
+      label: 'Estrategia',
+      value: student.latest_n2,
+      description: 'Planifica su solucion o va directo al codigo?',
+    },
+    {
+      key: 'n3',
+      label: 'Validacion',
+      value: student.latest_n3,
+      description: 'Prueba y corrige su propio razonamiento?',
+    },
+    {
+      key: 'n4',
+      label: 'Uso de IA',
+      value: student.latest_n4,
+      description: 'Usa la IA criticamente o como oraculo?',
+    },
   ];
 
   return (
@@ -527,30 +832,56 @@ function StudentDetailCard({
           {student.student_name ?? 'Alumno'}
         </h3>
         <p className="text-xs text-[var(--color-text-secondary)]">
-          {student.student_email ?? student.student_id.slice(0, 12)} — {student.session_count} sesiones
+          {student.student_email ?? student.student_id.slice(0, 12)} — {student.session_count}{' '}
+          sesiones
         </p>
+        {/* Appropriation type in detail */}
+        {student.latest_appropriation_type && (
+          <div className="mt-1.5">
+            <AppropriationBadge type={student.latest_appropriation_type} />
+          </div>
+        )}
       </div>
 
       {/* N1-N4 detail */}
       <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {dimensions.map((dim) => (
-          <div key={dim.key} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+          <div
+            key={dim.key}
+            className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3"
+          >
             <div className="flex items-baseline justify-between">
-              <span className="text-xs font-medium text-[var(--color-text-secondary)]">{dim.label}</span>
-              <span className={`text-lg font-bold tabular-nums ${scoreColor(dim.value)}`}>
-                {formatScore(dim.value)}
+              <span className="text-xs font-medium text-[var(--color-text-secondary)]">
+                {dim.label}
               </span>
+              {dim.key === 'n4' && dim.value === null ? (
+                <span className="text-[0.625rem] font-medium italic text-[var(--color-text-tertiary)]">
+                  Sin interaccion
+                </span>
+              ) : (
+                <span className={`text-lg font-bold tabular-nums ${scoreColor(dim.value)}`}>
+                  {formatScore(dim.value)}
+                </span>
+              )}
             </div>
-            <p className="mt-1 text-[0.625rem] leading-snug text-[var(--color-text-tertiary)]">{dim.description}</p>
+            <p className="mt-1 text-[0.625rem] leading-snug text-[var(--color-text-tertiary)]">
+              {dim.description}
+            </p>
             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-neutral-100)] dark:bg-[var(--color-neutral-800)]">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${
-                  (dim.value ?? 0) >= 70 ? 'bg-[var(--color-success-500)]'
-                    : (dim.value ?? 0) >= 40 ? 'bg-[var(--color-warning-500)]'
-                      : 'bg-[var(--color-error-500)]'
-                }`}
-                style={{ width: `${dim.value ?? 0}%` }}
-              />
+              {dim.key === 'n4' && dim.value === null ? (
+                <div className="h-full w-full rounded-full bg-[var(--color-neutral-200)] dark:bg-[var(--color-neutral-700)]" />
+              ) : (
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    (dim.value ?? 0) >= 70
+                      ? 'bg-[var(--color-success-500)]'
+                      : (dim.value ?? 0) >= 40
+                        ? 'bg-[var(--color-warning-500)]'
+                        : 'bg-[var(--color-error-500)]'
+                  }`}
+                  style={{ width: `${dim.value ?? 0}%` }}
+                />
+              )}
             </div>
           </div>
         ))}
@@ -573,28 +904,45 @@ function StudentDetailCard({
         {loadingSessions ? (
           <p className="mt-2 text-xs text-[var(--color-text-tertiary)]">Cargando sesiones...</p>
         ) : sessions.length === 0 ? (
-          <p className="mt-2 text-xs text-[var(--color-text-tertiary)]">Sin sesiones registradas.</p>
+          <p className="mt-2 text-xs text-[var(--color-text-tertiary)]">
+            Sin sesiones registradas.
+          </p>
         ) : (
           <div className="mt-2 space-y-1.5">
             {sessions.map((s) => (
               <button
                 key={s.id}
-                onClick={() => navigate(`/teacher/students/${student.student_id}/activity?commission=${commissionId}`)}
-                className="flex w-full items-center justify-between rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-left transition-colors hover:bg-[var(--color-neutral-50)] dark:hover:bg-[var(--color-neutral-800)]/20"
+                onClick={() => {
+                  if (!activityId) return;
+                  const params = new URLSearchParams({ commission: commissionId, activity_id: activityId });
+                  navigate(
+                    `/teacher/students/${student.student_id}/activity?${params.toString()}`,
+                  );
+                }}
+                className="flex min-h-11 w-full items-center justify-between rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-left transition-colors hover:bg-[var(--color-neutral-50)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-500)] dark:hover:bg-[var(--color-neutral-800)]/20"
               >
                 <div>
                   <span className="text-xs font-medium text-[var(--color-text-primary)]">
-                    {new Date(s.started_at).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    {new Date(s.started_at).toLocaleString('es-AR', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
                   </span>
-                  <span className={`ml-2 rounded-full px-2 py-0.5 text-[0.5625rem] font-semibold ${
-                    s.status === 'closed'
-                      ? 'bg-[var(--color-success-50)] text-[var(--color-success-700)] dark:bg-[var(--color-success-900)]/20 dark:text-[var(--color-success-400)]'
-                      : 'bg-[var(--color-info-50)] text-[var(--color-info-700)] dark:bg-[var(--color-info-900)]/20 dark:text-[var(--color-info-400)]'
-                  }`}>
+                  <span
+                    className={`ml-2 rounded-full px-2 py-0.5 text-[0.5625rem] font-semibold ${
+                      s.status === 'closed'
+                        ? 'bg-[var(--color-success-50)] text-[var(--color-success-700)] dark:bg-[var(--color-success-900)]/20 dark:text-[var(--color-success-400)]'
+                        : 'bg-[var(--color-info-50)] text-[var(--color-info-700)] dark:bg-[var(--color-info-900)]/20 dark:text-[var(--color-info-400)]'
+                    }`}
+                  >
                     {s.status === 'closed' ? 'Cerrada' : 'En curso'}
                   </span>
                 </div>
-                <span className="text-xs font-medium text-[var(--color-accent-600)]">Ver actividad completa →</span>
+                <span className="text-xs font-medium text-[var(--color-accent-600)]">
+                  Ver actividad completa →
+                </span>
               </button>
             ))}
           </div>

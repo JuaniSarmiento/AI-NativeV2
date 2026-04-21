@@ -53,6 +53,12 @@ export interface ChatMessage {
   n4_level: number | null;
 }
 
+export interface TraceAnomaly {
+  code: string;
+  message: string;
+  severity?: 'low' | 'medium' | 'high';
+}
+
 export interface TraceData {
   session: TraceSession;
   student_name: string | null;
@@ -63,6 +69,7 @@ export interface TraceData {
   chat: ChatMessage[];
   metrics: TraceMetrics | null;
   verification: VerifyResult | null;
+  anomalies?: TraceAnomaly[] | null;
 }
 
 export const N4_LEVEL_COLORS: Record<number, string> = {
