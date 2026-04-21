@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 
 from sqlalchemy import select
@@ -7,6 +8,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError, ValidationError
+
+logger = logging.getLogger(__name__)
 from app.core.llm import get_adapter
 from app.features.activities.services import LLMConfigService
 from app.features.reports.analytical import (
@@ -78,7 +81,14 @@ class ReportService:
             model_name=llm_config.model_name,
         )
 
-        narrative_md = await generate_narrative(adapter, analysis)
+        try:
+            narrative_md = await generate_narrative(adapter, analysis)
+        except Exception as exc:
+            logger.error("LLM call failed during report generation: %s", exc)
+            raise ValidationError(
+                "El proveedor de LLM no está disponible en este momento. "
+                "Intentá de nuevo en unos minutos."
+            )
 
         report = CognitiveReport(
             student_id=student_id,
